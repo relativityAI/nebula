@@ -1,0 +1,134 @@
+{
+    "name" : "avishkar-test",
+    "created_at" : "2026-01-15T11:02:37.264573",
+
+    "parameters" : {
+
+        "quantitative":{
+
+            "financials" : {
+
+                "opm":{"type":"higher","midpoint":0.1,"weight":1.2},
+                "pat_margin":{"type":"higher","midpoint":0.12,"weight":1.1},
+                "roa":{"type":"higher","midpoint":0.10,"weight":1.0},
+                "roe":{"type":"higher","midpoint":0.18,"weight":1.2},
+                "employee_cost_margin":{"type":"lower","midpoint":0.06,"weight":0.8},
+
+                "pe":{"type":"lower","midpoint":20,"weight":0.9},
+                "ps":{"type":"lower","midpoint":4,"weight":0.8},
+                "peg_3y":{"type":"sweet","center":1.0,"width":0.6,"weight":0.9},
+                "peg_5y":{"type":"sweet","center":1.0,"width":0.6,"weight":0.9},
+
+                "revenue_qoq":{"type":"higher","midpoint":0.08,"weight":0.7},
+                "revenue_yoy":{"type":"higher","midpoint":0.15,"weight":1.0},
+                "revenue_ttm_cagr_1y":{"type":"higher","midpoint":0.20,"weight":1.1},
+                "revenue_ttm_cagr_3y":{"type":"higher","midpoint":0.20,"weight":1.1},
+                "revenue_ttm_cagr_5y":{"type":"higher","midpoint":0.20,"weight":1.1},
+
+                "eps_qoq": {"type":"higher","midpoint":0.08,"weight":0.7},
+                "eps_yoy": {"type":"higher","midpoint":0.15,"weight":1.0},
+                "eps_ttm_cagr_1y": {"type":"higher","midpoint":0.25,"weight":1.0},
+                "eps_ttm_cagr_3y": {"type":"higher","midpoint":0.25,"weight":1.0},
+                "eps_ttm_cagr_5y": {"type":"higher","midpoint":0.25,"weight":1.0},
+
+                "pat_qoq": {"type":"higher","midpoint":0.08,"weight":0.7},
+                "pat_yoy": {"type":"higher","midpoint":0.15,"weight":1.0},
+                "pat_ttm_cagr_1y": {"type":"higher","midpoint":0.25,"weight":1.0},
+                "pat_ttm_cagr_3y": {"type":"higher","midpoint":0.25,"weight":1.0},
+                "pat_ttm_cagr_5y": {"type":"higher","midpoint":0.25,"weight":1.0}
+
+            },
+
+
+            "technicals" : {
+                "rsi":{"type":"sweet","center":50,"width":15,"weight":1.0},
+                "stoch_k":{"type":"sweet","center":50,"width":20,"weight":0.8},
+                "stoch_d":{"type":"sweet","center":50,"width":20,"weight":0.8},
+                "macd_hist":{"type":"higher","midpoint":0.0,"weight":1.1},
+                "macd":{"type":"higher","midpoint":0.0,"weight":0.9},
+                "adx":{"type":"higher","midpoint":25,"weight":1.0},
+                "plus_di_minus_di":{"type":"higher","midpoint":0.0,"weight":0.9},
+                "sma_20_50_diff":{"type":"higher","midpoint":0.0,"weight":1.0},
+                "sma_50_200_diff":{"type":"higher","midpoint":0.0,"weight":1.2},
+                "ema_12_26_diff":{"type":"higher","midpoint":0.0,"weight":1.0},
+                "bb_percent_b":{"type":"sweet","center":0.5,"width":0.25,"weight":0.8},
+                "cci":{"type":"sweet","center":0.0,"width":100,"weight":0.7},
+                "atr_pct":{"type":"lower","midpoint":0.03,"weight":0.7},
+                "volatility_20d":{"type":"lower","midpoint":0.04,"weight":0.6},
+                "momentum_10d":{"type":"higher","midpoint":0.0,"weight":0.9},
+                "roc_10d":{"type":"higher","midpoint":0.0,"weight":0.9}
+            },
+
+            "macro" : {
+
+                "industry_score" : 100,
+                "sector_score" : 100
+
+            }
+
+
+
+        },
+
+        "qualitative":{
+
+
+            "promoter_shareholding" : {
+
+                "title" : "Promoter Shareholding",
+
+                "description" : "### **Promoter Skin in the Game**\r\n\r\n* **Where to look:** Fetch data on shareholding pattern - which depict the shareholding or ownership percentage by promoters\/management over historical time periods.\r\n* **What info to look at:** Look for the trend in promoter holdings.\r\n* **Positive:** Promoters increasing their stake shows confidence.\r\n* **Negative:** Promoters consistently reducing their stake may mean they don't believe in the company\u2019s future.\r\n",
+
+                "tools" : [
+
+                    "read_shareholdings"
+                    
+                ],
+
+                "weight" : 0.5
+
+            },
+
+
+            "promoter_salary" : {
+
+                "title" : "Promoter Salary",
+
+                "description" : "### **Promoter Salary & Remuneration**\r\n\r\n* **Where to look:** Look into data on employee expenses - which depict the amount of salary taken by employees and management over historical time periods.\r\n* **What info to look at:** Ensure the management's salary is in line with company profits. The management's salary percentage should not drastically increase. \r\n* **Red Flag:** If profits or sales are decreasing but employee costs (salaries) are significantly increasing, it indicates poor management priorities .\r\n*",
+
+                "tools" : [
+
+                    "read_expenses"
+
+                ],
+
+                "weight" : 1
+
+            },
+
+            "board_of_directors" : {
+
+                "title" : "Board of Directors",
+                
+                "description" : "### **Composition of Board of Directors**\r\n* **What info to look at:** Check the ratio of **Executive** (insiders) vs. **Non-Executive\/Independent** Directors in the governance section of the annual report.\r\n* **Ideal Setup:** At least 50% of the board should be Independent Directors (industry experts with no conflict of interest). This prevents a single person (like a CEO) from having absolute, unchecked power.\r\n* **Red Flag:** Boards filled with family members (uncles, cousins) who only exist to sign papers.",
+
+                "tools" : [
+
+                    "read_annual_report_governance"
+
+                ],
+
+                "weight" : 1
+                
+            }
+
+
+        }
+
+        
+    }
+
+    
+
+
+}

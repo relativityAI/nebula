@@ -1,0 +1,209 @@
+
+identify_parameters_task:
+  description: >
+    You are given a directory {docs_dir} containing multiple files. These files include
+    information written by or about an investor — including their investment decisions,
+    philosophies, heuristics, comments, and thought processes.
+
+    Your task is to carefully extract *as many relevant parameters, focus areas, and
+    recurring analytical themes* as possible from this material. These parameters should
+    represent the aspects the investor consistently pays attention to when evaluating an
+    investment opportunity (usually stocks or public companies).
+
+    The goal at this stage is **not** to provide detailed analysis, judgments, or examples.
+    Instead, accurately identify and clearly name each focus area/theme that appears
+    meaningful or repeatedly emphasized by the investor. Keep descriptions brief, but
+    ensure they are unambiguous and correctly reflect the investor’s thinking patterns.
+
+    After extracting the parameters, save them as a Markdown file named `parameters.md`
+    in the provided output directory {output_dir}. Each parameter should be a bullet point
+    with a short 1–2 sentence explanation.
+
+  expected_output: >
+    A structured point-wise list of all identified parameters and focus areas.
+
+
+extract_framework_task:
+  description: >
+    Review the context you got 
+    Your task is to read the list of parameters from that context and, for each parameter,
+    perform a deep, structured analysis using the previously provided documents about
+    the investor.
+
+    For each individual parameter, extract and document:
+      • The investor’s detailed interpretation of that parameter  
+      • What they consider “good”, “ideal”, or “desirable”  
+      • What they consider “bad”, risky, or undesirable  
+      • Common heuristics, rules, indicators, and thresholds  
+      • Examples (generic or implied by their writings)  
+      • Edge cases or nuances the investor cares about  
+      • How that parameter interacts with other parameters (if applicable)
+      • Make sure that you include both qualitative and quantitative parameters - wherever mentioned.
+      • Especially include numbers where financial ratios are mentioned.
+
+    Your output should be extremely detailed. Save **each parameter’s analysis as a separate
+    Markdown (.md) file** inside a subfolder named `parameters/` within {output_dir}.
+    The filenames should be derived from the parameter name (e.g., `valuation.md`,
+    `management_quality.md`).
+
+  expected_output: >
+    A set of Markdown files — one per focus area/parameter — saved inside
+    {output_dir}/parameters/, each containing a highly detailed, multi-section
+    analysis describing how the investor evaluates that parameter and how it influences
+    their decision-making.
+
+
+
+web_correlate_task:
+  description: >
+    You are given a share: {share_name}.
+    You are given a framework which defines one core focus area
+    of an investor's investment framework.
+    
+    {framework}
+
+    ---
+
+    Perform targeted online research for the given share,
+    focusing ONLY on information relevant to the focus area described
+    in the file.
+
+    Based on the researched information, evaluate how well the share's
+    current state aligns with the rules of this focus area.
+
+    Do NOT make an investment recommendation.
+    Do NOT compute any weighted averages.
+    Focus only on alignment vs misalignment.
+
+  expected_output: >
+    Return the response in the following STRICT format:
+
+    - Alignment highlights (max 3 bullet points)
+    - Misalignment / risk factors (max 3 bullet points)
+    - Brief overall assessment (1 bullet point)
+
+    FINAL_SCORE: X
+
+    Where:
+    - X is an integer between 0 and 100
+    - FINAL_SCORE must be on its own line
+    - Do not include any text after the FINAL_SCORE line
+    - Do not include percentages, symbols, or explanations after the number
+
+
+
+
+
+# identify_parameters_task:
+#   description: >
+#     You are given a directory {docs_dir}. The dir contains files.
+#     The contents of the files are written by or about an investor and his/her investment decisions or philosophies.
+#     Your task is to clearly identify the key focus areas of this investor, when he/she is analyzing an investment opportunity - most likely stocks and the stock market.
+#     These focus areas should represent the key aspects that the investor looks for while analyzing the investment. 
+#     You must also provide detailed explanation, per focus area, as to what would the investor consider good or bad when analyzing on that particular aspect of the stock or investment.
+    
+#     The purpose of this task is to create a profile of the investor, which represent exact details on his/her investment style, investment philosophy and decision making pattern. The resulting profile should be in a such a way, that when another person reads it, they should be able to predict how the investor might behave when analysing a different and new investment opportunity.
+    
+#     IMPORTANT - You need to be as detailed as possible.
+
+#   expected_output: >
+#     A detailed, point-wise written, multi-section textual analysis describing all extracted IMPORTANT and KEY focus areas that are prioritized by the investor.
+
+#     Each mentioned focus area should contain detailed reasoning along with examples, as well as detailed explanations as to what might be considered positive or negative for that particular aspect of analysis.
+
+#   agent: profiler
+
+
+# extract_framework_task:
+#   description: >
+#     Given the list of parameters, 
+#     this is the output dir
+#     perform analysis
+#     extract rules, examples, key things to look for within that focus area
+#     as detailed as possible per focus area
+
+#   expected_output: >
+#     A highly detailed point wise stuff - separate for each focus area.
+
+#   agent: profiler
+
+
+
+
+
+
+
+# generate_profile_task:
+#   description: >
+#     You will receive input text containing extracted investor actions and 
+#     their associated reasoning. Your task is to synthesize this information 
+#     into a highly detailed and concrete investor profile.
+
+#     Follow these steps strictly:
+
+#     1. **Identify specific behaviors**:
+#        - Extract recurring decision patterns, repeated justifications,
+#          preferences, risk-related choices, and situational reactions.
+#        - Use quotes or clear paraphrases from the provided actions to support
+#          each behavioral insight.
+
+#     2. **Infer underlying principles**:
+#        - For every observed behavior, infer what it reveals about the 
+#          investor’s philosophy, mindset, heuristics, or biases.
+#        - Avoid generic or vague statements; all inferences must be connected 
+#          to explicit examples.
+
+#     3. **Construct a comprehensive narrative profile**:
+#        - Describe how and why the investor makes decisions the way they do.
+#        - Connect individual incidents to broader tendencies or frameworks.
+
+#     Your profile must thoroughly cover:
+#       - Core investment philosophy (value, growth, contrarian, factor-based, etc.)
+#       - Decision-making style (data-driven, intuition-based, macro-oriented, etc.)
+#       - Investment time horizon (short-term, swing, long-term, multi-year)
+#       - Risk appetite & capital allocation behavior
+#       - Preferred industries, sectors, or asset classes
+#       - Conditions that trigger buys, sells, or holds
+#       - Analytical methods, metrics, or frameworks used
+#       - Reasoning patterns (fundamentals, cycles, catalysts, narratives, etc.)
+#       - Psychological or emotional tendencies (e.g., cautious, bold, reactive)
+#       - Unique characteristics that distinguish this investor
+
+#     4. **Produce a set of key parameters**:
+#        - Include *as many parameters as are meaningfully supported* by the 
+#          behavioral evidence.
+#        - Each parameter must be concisely named and followed by a detailed 
+#          explanation tied to specific examples.
+#        - Do not add speculative parameters not supported by the provided actions.
+
+#   expected_output: >
+#     A two-part output:
+#       1. A detailed narrative investor profile supported by specific examples.
+#       2. A list of clearly named parameters summarizing the investor’s
+#          philosophy, mindset, and behavioral tendencies, each with evidence.
+
+
+
+
+
+
+# web_correlate_task:
+#   description: >
+#     You are given a share {share_name}. 
+#     You are provided with a folder which contains multiple files containing the investing framework of an investor : {parameters_dir}
+
+#     Each file represents a core aspect or a core focus area that the investor focuses on while analysing a share - to check whether it is worthy of investment.
+
+#     Perform deep online research of the share {share_name} to gather the most relevant and up-to-date information across each of the focus area. In other words, for each file, based on the contents of file/focus area, perform relevant web search to get relevant information. 
+    
+
+#   expected_output: >
+#     A detailed explanation on how well the information retrieved by the web matches with the investment philosophy of the investor.
+
+#     For each file content/ focus area, generate a score out of 100 depicting how well the share information matches with the focus area. Clearly identifying areas of alignment and misalignment.
+
+#     Finally, provide a brief summarization of correlation analysis, along with a table of focus area and its corresponding score, concluding with the average of the scores out of 100 , and a brief explanation justifying the final score.
+
+#     Important: Save the final response at {save_path}
+
+

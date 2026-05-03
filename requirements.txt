@@ -1,0 +1,12 @@
+# crewai
+# crewai[tools]
+# google-genai
+pypdf
+fastapi
+uvicorn
+python-dotenv
+# python-multipart
+pyjwt
+# tavily-python
+rich
+litellm
