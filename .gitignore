@@ -6,6 +6,7 @@ executions
 tests
 documents
 analysis
+templates/
 
 ### Python ###
 # Byte-compiled / optimized / DLL files

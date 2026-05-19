@@ -6,16 +6,14 @@ from pydantic import Field
 class Profile(Document):
     name: Indexed(str, unique=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    data_sources: Dict[str, Any] = Field(default_factory=dict)
     parameters: Dict[str, Any] = Field(default_factory=dict)
     
-    # Optional fields from previous iterations if still needed
+    # Metadata
     llm: Optional[str] = None
     max_rpm: Optional[int] = None
     max_iter: Optional[int] = None
     max_retry_limit: Optional[int] = None
-    docs_dir: Optional[str] = None
-    documents: Optional[List[str]] = None
-    duration: Optional[float] = None
 
     class Settings:
         name = "profiles"
