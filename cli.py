@@ -1,477 +1,247 @@
 import typer
-from pprint import pprint
-from typing import List
-import os, time
-from rich import print
-from rich.console import Console
-from rich.text import Text
-from rich.table import Table
-from datetime import datetime
-import re
-import uuid
+import os
+import time
 import json
+import re
+import random
+import string
 import pandas as pd
-
-from src.utils import (
-    printmd,
-    write_json, 
-    read_json, 
-    write_file,
-    read_file
-    )
-
-
-console = Console()
-
-import logging
-logging.basicConfig(level=logging.INFO)
+from loguru import logger
+from datetime import datetime
+from typing import List, Optional
+from db.connection import init_db
+from db.models import Profile, AnalysisRun
+from src.utils import printmd, read_file
+# from src.voyager import nse_financials_analysis
+import asyncio
+from functools import wraps
 
 app = typer.Typer()
-config = read_json('src/config.json')
 
-
-@app.command()
-def generate_profile(
-        docs_dir: str, 
-        name: str,
-        # llm :str = "groq/meta-llama/llama-4-scout-17b-16e-instruct",
-        max_rpm = 5,
-        max_iter : int = 5,
-        max_retry_limit : int = 4,
-        llm :str = "gemini/gemini-2.5-flash"
-        # "openrouter/mistralai/mistral-7b-instruct:free"
-        ):
-
-    start = time.time()
-
-    if not os.path.exists(docs_dir):
-        print("Directory not found !")
-        return
-
-
-    os.makedirs(config['paths']['executions'], exist_ok=True)
-    os.makedirs(config['paths']['profiles'], exist_ok=True)
-
-
-    save_dir = os.path.join(config['paths']['profiles'], name)
-    metadata_path = os.path.join(save_dir, "metadata.json")
-    parameters_path = os.path.join(save_dir, 'parameters.md')
-    parameters_dir = os.path.join(save_dir, "parameters")
-    os.makedirs(save_dir)
-    os.makedirs(parameters_dir, exist_ok=True)
-
-
-    from src.crews import ProfilerCrew
-
-
-    response = ProfilerCrew(llm=llm, max_rpm=max_rpm).crew().kickoff(
-        inputs={
-            "docs_dir" : docs_dir,
-            "output_dir" : save_dir
-        }
-    )
-
-    end = time.time()
-
-    metadata = {
-        "name" : name,
-        "created_at" : datetime.utcnow().isoformat(),
-        "llm": llm,
-        "max_rpm" :max_rpm,
-        "max_iter" :max_iter,
-        "max_retry_limit" :max_retry_limit,
-        "docs_dir" : docs_dir,
-        "documents" : os.listdir(docs_dir),
-        "duration" : (end-start) 
-    }
-
-
-    write_json(metadata, metadata_path)
-
-    logging.info("Profile generation complete")
-    logging.info(f"Saved profile at : {save_dir}")
+def coro(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        return asyncio.run(f(*args, **kwargs))
+    return wrapper
 
 @app.command()
-def available_profiles():
-    base_path = config['paths']['profiles']
-
-    table = Table(
-        title="Available Profiles",
-        header_style="bold cyan",
-        show_lines=False,
-    )
-
-    table.add_column("Profile ID / Folder", style="yellow", no_wrap=True)
-    table.add_column("Name", style="green")
-    table.add_column("Created")
-    table.add_column("Docs Dir")
-    table.add_column("# Docs", justify="right")
-    table.add_column("# Params", justify="right")
-
-    for folder in sorted(os.listdir(base_path)):
-        folder_path = os.path.join(base_path, folder)
-        params_dir = os.path.join(folder_path, "parameters")
-        metadata_path = os.path.join(folder_path, "metadata.json")
-
-        if not os.path.isdir(folder_path) or not os.path.exists(metadata_path):
-            continue
-
+@coro
+async def create_profile(
+    name: str = typer.Option(None),
+    file: Optional[str] = typer.Option(None)
+):
+    await init_db()
+    if file:
         try:
-            d = read_json(metadata_path)
-
-            created_at = datetime.fromisoformat(
-                d["created_at"].replace("Z", "+00:00")
-            ).strftime("%d %b %Y %H:%M")
-
-            documents = d.get("documents", [])
-            doc_count = len(documents) if isinstance(documents, list) else "N/A"
-            num_params = None
-            if os.path.exists(params_dir):
-                num_params = len(os.listdir(params_dir))
-            table.add_row(
-                folder,
-                d.get("name", "N/A"),
-                created_at,
-                d.get("docs_dir", "N/A"),
-                str(doc_count),
-                # f"{d.get('duration', 0)/60:.2f} min",
-                str(num_params)
-            )
-
+            with open(file, 'r') as f:
+                data = json.load(f)
+            # Handle potential nested 'parameters' if the user passes the whole JSON
+            profile_data = {
+                "name": data.get("name", name),
+                "parameters": data.get("parameters", data) # Fallback to entire object if no 'parameters' key
+            }
+            # Remove 'name' from parameters if it was root
+            if "name" in profile_data["parameters"]:
+                del profile_data["parameters"]["name"]
+                
+            profile = Profile(**profile_data)
+            await profile.save()
+            logger.success(f"Profile '{profile.name}' imported and saved.")
         except Exception as e:
-            table.add_row(
-                folder,
-                f"[red]{e}[/]",
-                "-", "-", "-"
-            )
-
-    console.print(table)
-
-
-@app.command()
-def read_profile(profile: str):
-    profiles = os.listdir(config['paths']['profiles'])
-
-    if profile in profiles:
-        md = read_file(os.path.join(config['paths']['profiles'], profile,f"profile.md"))
-        printmd(md)
+            logger.error(f"Failed to import profile: {e}")
     else:
-        print("[bold cyan]Cant find {profile}. Please choose from the following profiles:[/]")
-        for p in profiles:
-            print(f"  • [green]{p.split('.')[0]}[/]")
+        if not name:
+            name = typer.prompt("Enter profile name")
+        profile = Profile(name=name)
+        await profile.save()
+        logger.success(f"Profile '{name}' created in database.")
 
+@app.command(name="available_profiles")
+@coro
+async def available_profiles():
+    await init_db()
+    profiles = await Profile.find_all().to_list()
+    if not profiles:
+        logger.info("No profiles found.")
+        return
+    logger.info("Available Profiles:")
+    for p in profiles:
+        logger.info(f"- {p.name} (Created: {p.created_at.strftime('%Y-%m-%d %H:%M')})")
 
-@app.command()
-def available_analysis():
-    base_path = config['paths']['analysis']
+@app.command(name="read_profile")
+@coro
+async def read_profile(name: str):
+    await init_db()
+    profile = await Profile.find_one({"name": name})
+    if profile:
+        logger.info(f"Profile: {profile.name}")
+        logger.info(json.dumps(profile.parameters, indent=2))
+    else:
+        logger.error(f"Profile '{name}' not found.")
 
-    table = Table(
-        title="Available Analysis",
-        show_lines=False,
-        header_style="bold cyan"
-    )
+@app.command(name="available_analysis")
+@coro
+async def available_analysis():
+    await init_db()
+    runs = await AnalysisRun.find_all().sort(+AnalysisRun.created_at).to_list()
+    if not runs:
+        logger.info("No analysis runs found.")
+        return
+    logger.info("Available Analysis Runs:")
+    for r in runs:
+        duration = f"{r.duration/60:.0f}m {r.duration%60:.0f}s"
+        logger.info(f"ID: {r.corr_id} | {r.symbol} | {r.share_name} | {r.created_at.strftime('%Y-%m-%d %H:%M')} | {duration}")
 
-    table.add_column("ID / Folder", style="yellow", no_wrap=True)
-    table.add_column("Symbol", style="green")
-    table.add_column("Share", style="green")
-    table.add_column("Profile")
-    table.add_column("Model")
-    table.add_column("Created")
-    table.add_column("RPM", justify="right")
-    table.add_column("Iterations", justify="right")
-    table.add_column("Duration (min)", justify="right")
-
-    rows = []  # ← collect rows first
-
-    for runid in os.listdir(base_path):
-        run_dir = os.path.join(base_path, runid)
-        run_path = os.path.join(run_dir, "run.json")
-
-        if not os.path.isdir(run_dir) or not os.path.exists(run_path):
-            continue
-
-        try:
-            run = read_json(run_path)
-
-            created_dt = datetime.fromisoformat(
-                run["created_at"].replace("Z", "+00:00")
-            )
-
-            created_str = created_dt.strftime("%d %b %Y %H:%M")
-            duration = run.get("duration", 0)
-
-            rows.append((
-                created_dt,  # ← keep raw datetime for sorting
-                (
-                    runid,
-                    run.get("symbol", "N/A"),
-                    run.get("share_name", "N/A"),
-                    run.get("profile", "N/A"),
-                    run.get("model", "N/A"),
-                    created_str,
-                    str(run.get("rpm", "N/A")),
-                    str(run.get("iterations", "N/A")),
-                    f"{duration/60:.0f} m {duration%60:.0f} s",
-                )
-            ))
-
-        except Exception as e:
-            rows.append((
-                datetime.min,
-                (
-                    runid,
-                    f"[red]{e}[/]",
-                    "-", "-", "-", "-", "-", "-", "-"
-                )
-            ))
-
-    # ✅ sort: oldest → newest (latest at bottom)
-    rows.sort(key=lambda x: x[0])
-
-    # render table
-    for _, row in rows:
-        table.add_row(*row)
-
-    console.print(table)
-
-
-@app.command()
+@app.command(name="available_tools")
 def available_tools():
-
     from src.tools import CUSTOM_TOOLS_MAP
+    logger.info("Available Tools:")
+    for tool, desc in CUSTOM_TOOLS_MAP.items():
+        logger.info(f"- {tool}: {desc}")
 
-    table = Table(
-        title="Available Tools",
-        header_style="bold cyan",
-        show_lines=False,
-    )
+# @app.command(name="financial_check")
+# @coro
+# async def financial_check(symbol: str, profile_name: str):
+#     await init_db()
+#     profile = await Profile.find_one({"name": profile_name})
+#     if not profile:
+#         logger.error(f"Profile '{profile_name}' not found.")
+#         return
+    
+#     quant = profile.parameters.get('quantitative', {})
+#     logger.info(f"Analyzing {symbol} financials...")
+#     fundamental = nse_financials_analysis(symbol, thresholds=quant.get('financials'))
+#     logger.info(f"Score: {fundamental['score']}")
 
-    table.add_column("Tool Name", style="yellow", no_wrap=True)
-    table.add_column("Description", style="green")
-
-    for tool in CUSTOM_TOOLS_MAP:
-        table.add_row(tool, CUSTOM_TOOLS_MAP[tool])
-
-    console.print(table)
-
-from src.voyager import nse_financials_analysis
-
-@app.command()
-def financial_check(
-    symbol:str, 
-    profile:str,  
-    ):
-
-    profile = read_json(os.path.join(config['paths']['profiles'], profile, 'profile.json'))
-    qualitative = profile['parameters']['qualitative']
-    quantitative = profile['parameters']['quantitative']
-
-
-    logging.info(f"Quantitative analysis | Fundamental Analysis")
-    fundamental_analysis = nse_financials_analysis(symbol, thresholds=quantitative['financials'])
-
-    score = fundamental_analysis['score']
-    pprint(score)
-
-
-@app.command()
-def correlate_share(
-    share_name:str, 
-    symbol:str, 
-    profile:str,  
-    model :str = "cerebras/qwen-3-32b",
-    corr_id : str = None,
-    iters : int = 1,
-    rpm :int = 2,
-    max_retry : int = 3
-    ):
-
+@app.command(name="correlate_share")
+@coro
+async def correlate_share(
+    share_name: str,
+    symbol: str,
+    profile_name: str,
+    model: str = "cerebras/qwen-3-32b",
+    corr_id: str = None,
+    iters: int = 1,
+    rpm: int = 2,
+    max_retry: int = 3
+):
+    await init_db()
     start = time.time()
-
-
+    
     from src.technicals import get_price_data, technical_analysis_talib
     from src.agents import NebulAgent
 
-
-    from datetime import datetime
-    import random
-    import string
-
-    def short_id(n_random=2):
-        ts = datetime.utcnow().strftime("%y%m%d%H%M%S")  # YYMMDDHHMMSS
-        rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=n_random))
+    def short_id(n=2):
+        ts = datetime.utcnow().strftime("%y%m%d%H%M%S")
+        rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=n))
         return f"{ts}{rand}"
 
     def extract_score(text):
         m = re.search(r'FINAL_SCORE:\s*(\d{1,3})', text)
-        score = int(m.group(1)) if m else None
-        return score
+        return int(m.group(1)) if m else None
 
+    corr_id = corr_id or short_id()
+    profile = await Profile.find_one({"name": profile_name})
+    if not profile:
+        logger.error(f"Profile '{profile_name}' not found.")
+        return
 
-    corr_id = corr_id if corr_id else short_id()
-    save_dir = os.path.join(config['paths']['analysis'], corr_id)
-    run_path = os.path.join(save_dir, 'run.json')
-    os.makedirs(save_dir, exist_ok=True)
-
-    if os.path.exists(run_path):
-        logging.info("Loading previous run metadata...")
-        run = read_json(run_path)
-        run['rpm'] = rpm
-        run['max_retry'] = max_retry
-        run['iterations'] = max(run['iterations'], iters)
+    run = await AnalysisRun.find_one({"corr_id": corr_id})
+    if run:
+        logger.info(f"Resuming run {corr_id}...")
+        run.rpm = rpm
+        run.max_retry = max_retry
+        run.iterations = max(run.iterations, iters)
     else:
-        run = {
-            "symbol" : symbol,
-            "share_name" : share_name,
-            "created_at" : datetime.utcnow().isoformat(),
-            "profile" : profile,
-            "model" : model,
-            "corr_id" : corr_id,
-            "iterations" : iters,
-            "rpm" : rpm,
-            "max_retry" : max_retry,
-            "runs" : {}
-        }
-        write_json(run, run_path)
-        
+        run = AnalysisRun(
+            symbol=symbol,
+            share_name=share_name,
+            profile=profile_name,
+            model=model,
+            corr_id=corr_id,
+            iterations=iters,
+            rpm=rpm,
+            max_retry=max_retry
+        )
 
-    # loading profile
-    profile = read_json(os.path.join(config['paths']['profiles'], profile, 'profile.json'))
-    qualitative = profile['parameters']['qualitative']
-    quantitative = profile['parameters']['quantitative']
+    qualitative = profile.parameters.get('qualitative', {})
+    quantitative = profile.parameters.get('quantitative', {})
 
-
-    logging.info(f"Initiating correlation analysis ({corr_id} | {symbol} | {share_name})")
-
-    logging.info(f"Quantitative analysis | Fundamental Analysis")
-    fundamental_analysis = nse_financials_analysis(symbol, thresholds=quantitative['financials'])
-    run['fundamental_analysis'] = fundamental_analysis
-    write_json(run, run_path)
-
-    logging.info(f"Quantitative analysis | Technical Analysis")
-    price_df = get_price_data(f"{symbol}.NS", "3y")
-    technical_analysis = technical_analysis_talib(symbol, price_df, thresholds=quantitative['technicals'])
-    run['technical_analysis'] = technical_analysis
-    write_json(run, run_path)
-
+    logger.info(f"Starting correlation analysis for {symbol}...")
     
-    from collections import deque
-    q = deque()
+    run.fundamental_analysis = nse_financials_analysis(symbol, thresholds=quantitative.get('financials'))
+    price_df = get_price_data(f"{symbol}.NS", "3y")
+    run.technical_analysis = technical_analysis_talib(symbol, price_df, thresholds=quantitative.get('technicals'))
+    await run.save()
 
-
-    logging.info(f"Qualitative analysis | Initializing Agent...")
-    agent = NebulAgent(symbol=symbol, profile=profile, model=model)
+    q = [] # deque not used correctly previously, simple list/timestamp check is fine
+    agent = NebulAgent(symbol=symbol, profile=profile_name, model=model)
 
     for i in range(iters):
         iteration = str(i + 1)
+        if iteration not in run.runs:
+            run.runs[iteration] = {"iteration": iteration, "start_time": time.time(), "parameters": {}}
         
-        if not iteration in run['runs'].keys():
-            run["runs"][iteration] = {
-                "iteration" : iteration,
-                "start_time" : time.time(),
-                "parameters" : {}
-            }
-    
-
-        for param in qualitative:
-
-            if param in run['runs'][iteration]['parameters'].keys() and run['runs'][iteration]['parameters'][param]:
-                logging.info(f"Qualitative analysis | Exists | {param}")
+        for param, config in qualitative.items():
+            if param in run.runs[iteration]['parameters']:
                 continue
 
-            logging.info(f"Qualitative analysis | {param}")
-
-            title = qualitative[param]['title']
-            desc = qualitative[param]['description']
-            tools = qualitative[param]['tools']
-            weight = float(qualitative[param]['weight'])
-
-            # rate limiting check
-
+            logger.info(f"Qualitative | {param}")
+            
             now = time.time()
-            window_start = now - 60
-
-            while q and q[0] < window_start:
-                q.popleft()
-
+            q = [t for t in q if t > now - 60]
             if len(q) >= rpm:
-                print("Rate limit hit")
                 sleep_time = 60 - (now - q[0])
                 time.sleep(sleep_time)
-
             q.append(time.time())
 
-            response = agent.run(title, desc, tools)
-
+            response = agent.run(config['title'], config['description'], config['tools'])
             score = extract_score(response.choices[0].message.content)
+            
+            run.runs[iteration]['parameters'][param] = {
+                "score": score,
+                "weight": float(config.get('weight', 1.0)),
+                "response": response.model_dump()
+            }
+            run.duration = time.time() - start
+            run.end_time = time.time()
+            await run.save()
 
-            run["runs"][iteration]['parameters'][param] = {}
-            run["runs"][iteration]['parameters'][param]['score'] = score
-            run["runs"][iteration]['parameters'][param]['weight'] = weight
-            run['runs'][iteration]['parameters'][param]['response'] = response.model_dump()
-            run['duration'] = time.time() - start
-            run['end_time'] = time.time()
-            run['runs'][iteration]['end_time'] = time.time()
-    
-            write_json(run, run_path)
-            logging.info(f"Saved : {run_path}")
+        logger.success(f"Iteration {iteration} complete.")
 
-        # console.print(f"Iteration")
-        console.print(f"ITERATION {iteration} COMPLETE", style="green")
+@app.command(name="read_scores")
+@coro
+async def read_scores(corr_id: str):
+    await init_db()
+    run = await AnalysisRun.find_one({"corr_id": corr_id})
+    if not run:
+        logger.error("Run not found.")
+        return
 
-    logging.info("Correlation analysis complete")
-
-
-@app.command()
-def read_scores(
-    corr_id : str
-    ):
-
-    save_dir = os.path.join(config['paths']['analysis'], corr_id)
-    run_path = os.path.join(save_dir, 'run.json')
-    run = read_json(run_path)
-
-    profile = read_json(os.path.join(config['paths']['profiles'], run['profile'], 'profile.json'))
-
-
-    fundamental_score = run['fundamental_analysis']['score']['composite_score']
-    technical_score = run['technical_analysis']['score']['composite_score']
-
-    import pandas as pd
-    # import contextlib
-    # from rich.errors import NotRenderableError
+    profile = await Profile.find_one({"name": run.profile})
+    f_score = run.fundamental_analysis['score']['composite_score']
+    t_score = run.technical_analysis['score']['composite_score']
 
     dfs = []
-
-    for iter_id, iteration in run["runs"].items():
-
-        params = []
-        scores = []
-
-        for p in iteration['parameters']:
+    for iter_id, iteration in run.runs.items():
+        params, scores = [], []
+        for p, data in iteration['parameters'].items():
             params.append(p)
-            scores.append(iteration['parameters'][p]['score'])
+            scores.append(data['score'])
+        dfs.append(pd.DataFrame({'parameter': params, iter_id: scores}).set_index('parameter'))
 
-        dfs.append(pd.DataFrame({'parameter': params, iter_id : scores}).set_index('parameter'))
+    df = pd.concat(dfs, axis=1)
+    df['avg'] = df.mean(axis=1).astype(int)
+    
+    qual_config = profile.parameters.get('qualitative', {})
+    weights = {p: qual_config[p].get('weight', 1.0) for p in qual_config}
+    avgs = df['avg']
+    qual_score = sum(weights[p] * avgs[p] for p in avgs.index if p in weights) / sum(weights.values())
 
-    df = pd.concat(dfs, axis = 1, join='outer', ignore_index=False)
-    df['average'] = df.mean(axis=1).astype(int)
-    # df.loc['mean'] = df.mean()
-
-    avgs = df.mean(axis=1)
-    weights = { p: profile['parameters']['qualitative'][p]['weight'] for p in profile['parameters']['qualitative'] }
-    qual_score = sum([ weights[p] * avgs.loc[p] for p in avgs.index ]) / sum(weights.values())
-    qual_score = round(qual_score, 2)
-
-
-    print(df)
-    print()
-    console.print(f"Composite Fundamental Score: {fundamental_score}")
-    console.print(f"Composite Technical Score: {technical_score}")
-    console.print(f"Weighted Average Qualitative Score: {qual_score}")
-
-
-
+    logger.info(f"\n{df.to_string()}")
+    logger.info(f"Financial Score: {f_score}")
+    logger.info(f"Technical Score: {t_score}")
+    logger.info(f"Qualitative Score: {round(qual_score, 2)}")
 
 if __name__ == "__main__":
     app()
