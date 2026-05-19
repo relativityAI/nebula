@@ -24,13 +24,50 @@ Nebula turns that framework into an automated system for analysis and screening.
 - Select data sources (financial websites, market data, etc.)
 - Run analysis or stock screening using agents
 
-## Warning
+## Setup & Usage
 
-⚠️ You must run the [Voyager API](https://github.com/relativityai/voyager) for data access:  
-
-
-
-## CLI usage
-
+### 1. Start MongoDB
+Nebula uses MongoDB for storage. Start the database using Docker:
 ```bash
-python3 cli.py --help
+docker-compose up -d db
+```
+*(Optional)* View your data via Mongo Express at `http://localhost:8081`.
+
+### 2. Run Voyager API
+⚠️ You must run the [Voyager API](https://github.com/relativityai/voyager) to access external data.
+
+
+
+## CLI Usage
+
+### 1. Create a Profile
+Generate a template and then save it after editing:
+```bash
+python cli.py create-template --name my-strategy --sources screener
+# Edit templates/my-strategy.json
+python cli.py save-profile --file templates/my-strategy.json
+```
+
+### 2. Run Correlation Analysis
+```bash
+python cli.py correlate-share --share-name "HDFC Bank" --symbol HDFCBANK --profile-name my-strategy
+```
+
+### 3. Read Scores
+```bash
+python cli.py read-scores --corr-id <ID_FROM_PREVIOUS_STEP>
+```
+
+## API Usage
+
+Start the API:
+```bash
+python api.py
+```
+Documentation is automatically available at `http://localhost:8002/docs`.
+
+### Key Endpoints
+- `GET /profiles`: List all profiles.
+- `POST /profiles`: Create/Update a profile (JSON body).
+- `POST /correlate`: Start a new analysis (JSON body).
+- `GET /analysis/{corr_id}`: Get results of an analysis.
