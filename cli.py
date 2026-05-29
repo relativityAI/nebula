@@ -3,7 +3,7 @@ import os
 import json
 from loguru import logger
 from typing import List, Optional
-from db.connection import init_db
+from src.db.connection import init_db
 import asyncio
 from functools import wraps
 from src.core import (

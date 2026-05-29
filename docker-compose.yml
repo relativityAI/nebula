@@ -4,13 +4,12 @@ services:
     ports:
       - "8002:8002"
     environment:
-      MONGODB_URL: mongodb://root:example@db:27017/
-      MONGODB_DB_NAME: nebula
+      MONGODB_URL: mongodb://root:example@mongo:27017/
+      # MONGODB_URL: mongodb://root:example@db:27017/
+      MONGODB_DB_NAME: relativty
       PORT: 8002
-    depends_on:
-      - db
 
-  db:
+  mongo:
     image: mongo:latest
     ports:
       - "27017:27017"
@@ -32,3 +31,9 @@ services:
 
 volumes:
   nebuladb:
+
+
+networks:
+  default:
+    external: true
+    name: relativity-portfolio_default
