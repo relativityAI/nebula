@@ -1,18 +1,14 @@
-# crewai
-# crewai[tools]
-# google-genai
-pandas
-loguru
-pypdf
 fastapi
 uvicorn
 python-dotenv
-# python-multipart
-pyjwt
-# tavily-python
-beanie
+beanie>=1.23.0
 motor
 litellm
+httpx
+pandas
+loguru
+pypdf
+pyjwt
 
 beanie
 motor
