@@ -105,11 +105,11 @@ def evaluate_filter(value, filter_cfg):
         return 0.0
     return 0.0
 
-async def perform_analysis_task(corr_id: str):
+async def perform_analysis_task(analysis_id: str):
     try:
-        run = await AnalysisRun.find_one({"corr_id": corr_id})
+        run = await AnalysisRun.find_one({"analysis_id": analysis_id})
         if not run:
-            logger.error(f"AnalysisRun {corr_id} not found for background task")
+            logger.error(f"AnalysisRun {analysis_id} not found for background task")
             return
 
         run.status = "RUNNING"
@@ -181,7 +181,7 @@ async def perform_analysis_task(corr_id: str):
         run.end_time = time.time()
         run.duration = run.end_time - run.created_at.timestamp()
         await run.save()
-        logger.info(f"Analysis {corr_id} completed successfully")
+        logger.info(f"Analysis {analysis_id} completed successfully")
 
     except Exception as e:
         logger.exception(f"Error in perform_analysis_task: {str(e)}")
@@ -190,12 +190,12 @@ async def perform_analysis_task(corr_id: str):
             run.error = str(e)
             await run.save()
 
-async def run_correlation_logic(
+async def run_analysis_logic(
     share_name: str,
     symbol: str,
     profile_name: str,
     model: str = "cerebras/qwen-3-32b",
-    corr_id: str = None,
+    analysis_id: str = None,
     iters: int = 1,
     rpm: int = 2,
     max_retry: int = 3
@@ -205,7 +205,7 @@ async def run_correlation_logic(
         rand = ''.join(random.choices(string.ascii_lowercase + string.digits, k=n))
         return f"{ts}{rand}"
 
-    cid = corr_id or short_id()
+    aid = analysis_id or short_id()
     
     profile = await Profile.find_one({"name": profile_name})
     if not profile:
@@ -216,7 +216,7 @@ async def run_correlation_logic(
         share_name=share_name,
         profile=profile_name,
         model=model,
-        corr_id=cid,
+        analysis_id=aid,
         iterations=iters,
         rpm=rpm,
         max_retry=max_retry,
@@ -227,8 +227,8 @@ async def run_correlation_logic(
     # We return the run object. The caller (api.py) will start the background task.
     return run
 
-async def get_run_scores_logic(corr_id: str):
-    run = await AnalysisRun.find_one({"corr_id": corr_id})
+async def get_run_scores_logic(analysis_id: str):
+    run = await AnalysisRun.find_one({"analysis_id": analysis_id})
     if not run:
         return None
     
@@ -262,5 +262,12 @@ async def delete_profile_logic(name: str):
     profile = await Profile.find_one({"name": name})
     if profile:
         await profile.delete()
+        return True
+    return False
+
+async def delete_analysis_logic(analysis_id: str):
+    run = await AnalysisRun.find_one({"analysis_id": analysis_id})
+    if run:
+        await run.delete()
         return True
     return False

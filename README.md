@@ -48,14 +48,14 @@ python cli.py create-template --name my-strategy --sources screener
 python cli.py save-profile --file templates/my-strategy.json
 ```
 
-### 2. Run Correlation Analysis
+### 2. Run Analysis
 ```bash
-python cli.py correlate-share --share-name "HDFC Bank" --symbol HDFCBANK --profile-name my-strategy
+python cli.py run-analysis --share-name "HDFC Bank" --symbol HDFCBANK --profile-name my-strategy
 ```
 
 ### 3. Read Scores
 ```bash
-python cli.py read-scores --corr-id <ID_FROM_PREVIOUS_STEP>
+python cli.py read-scores --analysis-id <ID_FROM_PREVIOUS_STEP>
 ```
 
 ## API Usage
@@ -67,7 +67,9 @@ python api.py
 Documentation is automatically available at `http://localhost:8002/docs`.
 
 ### Key Endpoints
-- `GET /profiles`: List all profiles.
-- `POST /profiles`: Create/Update a profile (JSON body).
-- `POST /correlate`: Start a new analysis (JSON body).
-- `GET /analysis/{corr_id}`: Get results of an analysis.
+- `GET /list-profiles`: List all profiles.
+- `POST /update-profile`: Update a profile (JSON body).
+- `POST /run-analysis`: Start a new analysis (JSON body).
+- `GET /read-analysis?id=<id>`: Get results of an analysis.
+- `GET /list-analysis`: List all analysis runs.
+- `POST /delete-analysis`: Delete an analysis run (JSON body).

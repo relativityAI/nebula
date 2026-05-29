@@ -60,7 +60,7 @@ class Profile(Document):
         name = "profiles"
 
 class AnalysisRun(Document):
-    corr_id: Indexed(str, unique=True)
+    analysis_id: Indexed(str, unique=True)
     symbol: str
     share_name: str
     created_at: datetime = Field(default_factory=datetime.utcnow)

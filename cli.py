@@ -12,7 +12,7 @@ from src.core import (
     get_available_profiles_logic,
     get_profile_logic,
     get_analysis_runs_logic,
-    run_correlation_logic,
+    run_analysis_logic,
     get_run_scores_logic,
     delete_profile_logic
 )
@@ -97,7 +97,7 @@ async def available_analysis():
     logger.info("Available Analysis Runs:")
     for r in runs:
         duration = f"{r.duration/60:.0f}m {r.duration%60:.0f}s"
-        logger.info(f"ID: {r.corr_id} | {r.symbol} | {r.share_name} | {r.created_at.strftime('%Y-%m-%d %H:%M')} | {duration}")
+        logger.info(f"ID: {r.analysis_id} | {r.symbol} | {r.share_name} | {r.created_at.strftime('%Y-%m-%d %H:%M')} | {duration}")
 
 @app.command()
 def available_tools():
@@ -108,30 +108,30 @@ def available_tools():
 
 @app.command()
 @coro
-async def correlate_share(
+async def run_analysis(
     share_name: str,
     symbol: str,
     profile_name: str,
     model: str = "cerebras/qwen-3-32b",
-    corr_id: str = None,
+    analysis_id: str = None,
     iters: int = 1,
     rpm: int = 2,
     max_retry: int = 3
 ):
     await init_db()
     try:
-        run = await run_correlation_logic(
-            share_name, symbol, profile_name, model, corr_id, iters, rpm, max_retry
+        run = await run_analysis_logic(
+            share_name, symbol, profile_name, model, analysis_id, iters, rpm, max_retry
         )
-        logger.success(f"Correlation analysis complete for {symbol}. Run ID: {run.corr_id}")
+        logger.success(f"Analysis complete for {symbol}. Run ID: {run.analysis_id}")
     except Exception as e:
         logger.error(f"Analysis failed: {e}")
 
 @app.command()
 @coro
-async def read_scores(corr_id: str):
+async def read_scores(analysis_id: str):
     await init_db()
-    results = await get_run_scores_logic(corr_id)
+    results = await get_run_scores_logic(analysis_id)
     if not results:
         logger.error("Run not found.")
         return
