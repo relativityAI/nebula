@@ -9,9 +9,11 @@ from contextlib import asynccontextmanager
 from src.db.connection import init_db
 from src.db.models import Profile, QualitativeModel, DataSourceModel
 from src.core import (
-    run_correlation_logic,
+    run_analysis_logic,
     get_run_scores_logic,
-    perform_analysis_task
+    perform_analysis_task,
+    get_analysis_runs_logic,
+    delete_analysis_logic
 )
 from datetime import datetime
 from beanie import PydanticObjectId
@@ -49,13 +51,25 @@ class ProfileInfo(BaseModel):
 
     model_config = {"populate_by_name": True}
 
-class CorrelationRequest(BaseModel):
+class AnalysisRequest(BaseModel):
     share_name: str
     symbol: str
     profile_name: str
     model: str = "cerebras/qwen-3-32b"
     iters: int = 1
     rpm: int = 2
+
+class AnalysisModel(BaseModel):
+    analysis_id: str
+
+    model_config = {
+        "populate_by_name": True,
+        "json_schema_extra": {
+            "example": {
+                "analysis_id": "240529123456ab"
+            }
+        }
+    }
 
 # --- App Initialization ---
 
@@ -153,11 +167,20 @@ async def delete_profile(profile: ProfileModel):
         logger.error(f"Error deleting profile: {e}")
         return {"ok": 0, "error": str(e)}
 
-@app.get("/analysis/{corr_id}")
-async def get_analysis(corr_id: str):
-    results = await get_run_scores_logic(corr_id)
+
+# --- Analysis Endpoints ---
+
+@app.get("/list-analysis")
+async def list_analysis():
+    runs = await get_analysis_runs_logic()
+    return [json.loads(r.model_dump_json()) for r in runs]
+
+
+@app.get("/read-analysis")
+async def read_analysis(id: str):
+    results = await get_run_scores_logic(id)
     if not results:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+        return None
     
     run = results["run"]
     return {
@@ -169,13 +192,32 @@ async def get_analysis(corr_id: str):
         "error": run.error,
         "created_at": run.created_at,
         "end_time": run.end_time,
-        "duration": run.duration
+        "duration": run.duration,
+        "analysis_id": run.analysis_id
     }
 
-@app.post("/correlate")
-async def start_correlation(request: CorrelationRequest, background_tasks: BackgroundTasks):
+
+@app.post("/delete-analysis")
+async def delete_analysis(analysis: AnalysisModel):
     try:
-        run = await run_correlation_logic(
+        success = await delete_analysis_logic(analysis.analysis_id)
+        if success:
+            return {"ok": 1}
+        return {"ok": 0, "error": "Analysis not found"}
+    except Exception as e:
+        logger.error(f"Error deleting analysis: {e}")
+        return {"ok": 0, "error": str(e)}
+
+
+@app.get("/analysis/{analysis_id}")
+async def get_analysis_legacy(analysis_id: str):
+    return await read_analysis(analysis_id)
+
+
+@app.post("/run-analysis")
+async def run_analysis_endpoint(request: AnalysisRequest, background_tasks: BackgroundTasks):
+    try:
+        run = await run_analysis_logic(
             share_name=request.share_name,
             symbol=request.symbol,
             profile_name=request.profile_name,
@@ -183,8 +225,8 @@ async def start_correlation(request: CorrelationRequest, background_tasks: Backg
             iters=request.iters,
             rpm=request.rpm
         )
-        background_tasks.add_task(perform_analysis_task, run.corr_id)
-        return {"status": "success", "corr_id": run.corr_id}
+        background_tasks.add_task(perform_analysis_task, run.analysis_id)
+        return {"status": "success", "analysis_id": run.analysis_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
