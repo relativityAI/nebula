@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 import uvicorn
 import os
+import pandas as pd
 from pydantic import BaseModel, Field
 import json
 from loguru import logger
@@ -98,6 +99,52 @@ async def search_profiles(query: str):
         .to_list()
     )
     return matches
+
+
+# --- CSV Search Helpers ---
+
+EXCHANGES_DF = None
+STOCKS_DF = None
+
+def get_exchanges_df():
+    global EXCHANGES_DF
+    if EXCHANGES_DF is None:
+        path = "assets/exchanges.csv"
+        if os.path.exists(path):
+            EXCHANGES_DF = pd.read_csv(path, skipinitialspace=True)
+        else:
+            EXCHANGES_DF = pd.DataFrame(columns=["NAME", "SYMBOL", "COUNTRY"])
+    return EXCHANGES_DF
+
+def get_stocks_df():
+    global STOCKS_DF
+    if STOCKS_DF is None:
+        path = "assets/nse-equities.csv"
+        if os.path.exists(path):
+            STOCKS_DF = pd.read_csv(path, skipinitialspace=True)
+        else:
+            STOCKS_DF = pd.DataFrame(columns=["SYMBOL", "NAME"])
+    return STOCKS_DF
+
+@app.get("/search-exchanges")
+async def search_exchanges(query: str):
+    if not query:
+        return []
+    df = get_exchanges_df()
+    query = query.lower()
+    mask = df["NAME"].astype(str).str.lower().str.contains(query, na=False) | \
+           df["SYMBOL"].astype(str).str.lower().str.contains(query, na=False)
+    return df[mask].head(50).to_dict(orient="records")
+
+@app.get("/search-stocks")
+async def search_stocks(query: str):
+    if not query:
+        return []
+    df = get_stocks_df()
+    query = query.lower()
+    mask = df["NAME"].astype(str).str.lower().str.contains(query, na=False) | \
+           df["SYMBOL"].astype(str).str.lower().str.contains(query, na=False)
+    return df[mask].head(50).to_dict(orient="records")
 
 
 @app.get("/list-profiles")
