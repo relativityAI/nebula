@@ -65,15 +65,16 @@ class AnalysisRun(Document):
     share_name: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     profile: str
+    qualitative: List[QualitativeModel] = []
+    data_sources: List[DataSourceModel] = []
     model: str
     iterations: int
     rpm: int
     max_retry: int
     status: str = "PENDING"  # PENDING, RUNNING, COMPLETED, FAILED
-    fundamental_analysis: Optional[Dict[str, Any]] = None
-    technical_analysis: Optional[Dict[str, Any]] = None
-    quantitative_analysis: Optional[Dict[str, Any]] = None
     total_score: float = 0.0
+    quantitative_score: float = 0.0
+    qualitative_score: float = 0.0
     error: Optional[str] = None
     runs: Dict[str, Any] = Field(default_factory=dict)
     duration: float = 0.0
