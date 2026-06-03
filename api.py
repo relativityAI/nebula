@@ -232,15 +232,23 @@ async def read_analysis(id: str):
     run = results["run"]
     return {
         "symbol": run.symbol,
+        "share_name": run.share_name,
         "status": run.status,
         "total_score": run.total_score,
-        "quantitative_analysis": run.quantitative_analysis,
-        "qualitative_score": results.get("qualitative_score", 0),
+        "quantitative_score": run.quantitative_score,
+        "qualitative_score": run.qualitative_score,
+        "quantitative_analysis": run.runs.get("latest_quant", {}),
+        "qualitative": [json.loads(q.model_dump_json()) for q in run.qualitative],
+        "data_sources": [json.loads(d.model_dump_json()) for d in run.data_sources],
         "error": run.error,
         "created_at": run.created_at,
         "end_time": run.end_time,
         "duration": run.duration,
-        "analysis_id": run.analysis_id
+        "analysis_id": run.analysis_id,
+        "model": run.model,
+        "iterations": run.iterations,
+        "rpm": run.rpm,
+        "max_retry": run.max_retry
     }
 
 

@@ -11,6 +11,7 @@ from src.db.models import Profile, AnalysisRun
 import pandas as pd
 import httpx
 import asyncio
+import math
 
 # Available data source structures
 DATA_SOURCE_TEMPLATES = {
@@ -86,24 +87,52 @@ async def fetch_voyager_data(source: str, symbol: str):
             logger.error(f"Error calling Voyager API for {source}: {str(e)}")
     return None
 
+def sigmoid(x):
+    return 1 / (1 + math.exp(-x))
+
 def evaluate_filter(value, filter_cfg):
     try:
         val = float(value)
         direction = filter_cfg.get('direction', 'higher')
-        lower = float(filter_cfg.get('lower', 0))
-        upper = float(filter_cfg.get('upper', 0))
+        threshold = filter_cfg.get('threshold')
+        lower = filter_cfg.get('lower')
+        upper = filter_cfg.get('upper')
         
-        if direction == 'higher':
-            if val >= upper: return 1.0
-            if val <= lower: return 0.0
-            return (val - lower) / (upper - lower) if upper != lower else 0.0
-        elif direction == 'lower':
-            if val <= lower: return 1.0
-            if val >= upper: return 0.0
-            return (upper - val) / (upper - lower) if upper != lower else 0.0
-    except (ValueError, TypeError):
+        # Convert thresholds/limits to float, handling empties/nulls
+        t = float(threshold) if threshold not in [None, '', 'null'] else None
+        l = float(lower) if lower not in [None, '', 'null'] else None
+        u = float(upper) if upper not in [None, '', 'null'] else None
+
+        # Determine boundaries for sigmoid
+        if l is not None and u is not None:
+            mid = (l + u) / 2
+            width = u - l if u != l else 1.0
+        elif t is not None:
+            mid = t
+            # Default width to 20% of threshold or a reasonable default for small values
+            width = abs(t) * 0.2 if t != 0 else 1.0
+        else:
+            # If no preference set, we return a neutral score or 1.0? 
+            # User preferences are missing, so technically it fulfills "any" preference.
+            # But usually we return 0 for lack of specific data to compare.
+            return 0.0
+        
+        if width == 0: width = 1.0
+        
+        # k is steepness. We want score to be ~0.1 at 'low' end and ~0.9 at 'high' end of the 'good' range.
+        # Sigmoid(x) for x=2.2 is ~0.9. x=-2.2 is ~0.1.
+        k = 4.4 / width
+        
+        diff = val - mid
+        x = k * diff
+        
+        if direction == 'lower':
+            x = -x
+            
+        return sigmoid(x)
+
+    except (ValueError, TypeError, OverflowError):
         return 0.0
-    return 0.0
 
 async def perform_analysis_task(analysis_id: str):
     try:
@@ -124,58 +153,60 @@ async def perform_analysis_task(analysis_id: str):
 
         # Quantitative Analysis
         quant_results = {}
-        total_weighted_score = 0.0
-        total_weight = 0.0
+        total_quant_score = 0.0
+        source_count = 0
 
-        for source_cfg in profile.data_sources:
-            source_name = source_cfg.get("source")
+        for source_cfg in run.data_sources:
+            source_name = source_cfg.source
             if not source_name: continue
             
             data = await fetch_voyager_data(source_name, run.symbol)
             if not data:
-                quant_results[source_name] = {"error": "No data from source"}
+                quant_results[source_name] = {"error": "No data from source", "score": 0.0}
                 continue
             
             source_results = {"metrics": {}}
             source_score = 0.0
-            source_metrics_count = 0
+            metric_count = 0
 
-            for filter_cfg in source_cfg.get("filters", []):
-                metric = filter_cfg.get("metric")
-                # Handle cases where the data key might be different (e.g. lowercase or slightly modified)
-                # For now, assume exact match or look for it
+            for filter_cfg in source_cfg.filters:
+                metric = filter_cfg.metric
                 val = data.get(metric)
                 if val is None:
-                    # Fallback search if exact match fails
                     for k, v in data.items():
                         if k.lower() == metric.lower():
                             val = v
                             break
                 
-                score = evaluate_filter(val, filter_cfg)
+                filter_dict = filter_cfg.model_dump()
+                score = evaluate_filter(val, filter_dict)
                 source_results["metrics"][metric] = {
                     "value": val,
-                    "score": score
+                    "score": round(score, 4)
                 }
                 source_score += score
-                source_metrics_count += 1
+                metric_count += 1
             
-            if source_metrics_count > 0:
-                source_results["score"] = source_score / source_metrics_count
-                # For a simple scoring system, we can assign weights to sources later if needed
-                # For now, let's just average them
-                total_weighted_score += source_results["score"]
-                total_weight += 1
+            if metric_count > 0:
+                source_results["score"] = round(source_score / metric_count, 4)
+                total_quant_score += source_results["score"]
+                source_count += 1
             
             quant_results[source_name] = source_results
 
-        run.quantitative_analysis = quant_results
-        run.total_score = total_weighted_score / total_weight if total_weight > 0 else 0.0
+        # Calculated total quantitative score
+        final_quant_score = total_quant_score / source_count if source_count > 0 else 0.0
         
-        # Qualitative (Agentic) - The user said ignore for now or keep at 0
-        # If we wanted to keep the old logic, we could run it here.
-        # But per request: "ignore the qualitative thing... qualitative score may be 0"
-        # We can still run it if it doesn't take too long, but let's prioritize the quantitative part.
+        # Qualitative (Agentic) - Future placeholder, currently 0.0
+        final_qual_score = 0.0
+
+        run.runs["latest_quant"] = quant_results
+        run.quantitative_score = round(final_quant_score, 4)
+        run.qualitative_score = round(final_qual_score, 4)
+        
+        # Total score is a weighted average (50/50 for now if both exist, otherwise whatever is there)
+        # For now, let's just average them
+        run.total_score = round((final_quant_score + final_qual_score) / 1.0, 4) # Adjusting denominator if needed
         
         run.status = "COMPLETED"
         run.end_time = time.time()
@@ -215,6 +246,8 @@ async def run_analysis_logic(
         symbol=symbol,
         share_name=share_name,
         profile=profile_name,
+        qualitative=profile.qualitative,
+        data_sources=profile.data_sources,
         model=model,
         analysis_id=aid,
         iterations=iters,
@@ -236,17 +269,31 @@ async def get_run_scores_logic(analysis_id: str):
     
     dfs = []
     for iter_id, iteration in run.runs.items():
+        if not isinstance(iteration, dict) or 'parameters' not in iteration:
+            continue
         params, scores = [], []
         for p, data in iteration['parameters'].items():
             params.append(p)
             scores.append(data['score'])
-        dfs.append(pd.DataFrame({'parameter': params, iter_id: scores}).set_index('parameter'))
+        if params:
+            dfs.append(pd.DataFrame({'parameter': params, iter_id: scores}).set_index('parameter'))
+
+    if not dfs:
+        return {
+            "run": run,
+            "dataframe": pd.DataFrame(),
+            "qualitative_score": 0.0
+        }
 
     df = pd.concat(dfs, axis=1)
     df['avg'] = df.mean(axis=1).astype(int)
     
-    qual_config = profile.parameters.get('qualitative', {}) or profile.data_sources
-    weights = {p: qual_config[p].get('weight', 1.0) if isinstance(qual_config[p], dict) else 1.0 for p in qual_config}
+    # Updated to use data_sources from the run itself
+    weights = {}
+    for ds in run.data_sources:
+        for f in ds.filters:
+            weights[f.metric] = 1.0 # Default weight
+            
     avgs = df['avg']
     
     total_weight = sum(weights[p] for p in avgs.index if p in weights)

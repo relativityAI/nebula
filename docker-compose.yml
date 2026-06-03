@@ -6,7 +6,7 @@ services:
     environment:
       MONGODB_URL: mongodb://root:example@mongo:27017/
       # MONGODB_URL: mongodb://root:example@db:27017/
-      MONGODB_DB_NAME: relativty
+      MONGODB_DB_NAME: relativity
       PORT: 8002
 
   mongo:
