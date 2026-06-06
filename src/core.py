@@ -76,7 +76,8 @@ async def get_analysis_runs_logic():
     return await AnalysisRun.find_all().sort(+AnalysisRun.created_at).to_list()
 
 async def fetch_voyager_data(source: str, symbol: str):
-    url = f"http://localhost:8001/{source}"
+    voyager_base_url = os.getenv("VOYAGER_URL", "http://localhost:8001")
+    url = f"{voyager_base_url}/{source}"
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(url, params={"symbol": symbol}, timeout=10.0)
