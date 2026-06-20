@@ -24,8 +24,8 @@ from pydantic import BaseModel, Field
 class QualitativeModel(BaseModel):
     parameter: str
     content: str
-    # tools: Optional[List[Tool]] = []
-    # weight: Optional[float] = 0.0
+    preferred_source: Optional[str] = "Custom Document"
+    weightage: float = 1.0
 
 class DataSourceFilter(BaseModel):
     metric: str
@@ -49,6 +49,7 @@ class DataSourceModel(BaseModel):
     source: str
     image: Optional[str] = ""
     filters: List[DataSourceFilter] = []
+    weightage: float = 1.0
 
 class Profile(Document):
     name: Indexed(str, unique=True)

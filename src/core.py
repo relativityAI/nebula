@@ -12,6 +12,7 @@ import pandas as pd
 import httpx
 import asyncio
 import math
+from src.agentic_analysis.agent import NebulaAgent
 
 # Available data source structures
 DATA_SOURCE_TEMPLATES = {
@@ -88,52 +89,73 @@ async def fetch_voyager_data(source: str, symbol: str):
             logger.error(f"Error calling Voyager API for {source}: {str(e)}")
     return None
 
+
 def sigmoid(x):
+    x = max(-500, min(500, x))
     return 1 / (1 + math.exp(-x))
 
 def evaluate_filter(value, filter_cfg):
     try:
         val = float(value)
         direction = filter_cfg.get('direction', 'higher')
-        threshold = filter_cfg.get('threshold')
-        lower = filter_cfg.get('lower')
-        upper = filter_cfg.get('upper')
         
-        # Convert thresholds/limits to float, handling empties/nulls
-        t = float(threshold) if threshold not in [None, '', 'null'] else None
-        l = float(lower) if lower not in [None, '', 'null'] else None
-        u = float(upper) if upper not in [None, '', 'null'] else None
+        # Parse inputs safely
+        def to_float(k):
+            v = filter_cfg.get(k)
+            return float(v) if v not in [None, '', 'null'] else None
 
-        # Determine boundaries for sigmoid
-        if l is not None and u is not None:
-            mid = (l + u) / 2
-            width = u - l if u != l else 1.0
-        elif t is not None:
-            mid = t
-            # Default width to 20% of threshold or a reasonable default for small values
-            width = abs(t) * 0.2 if t != 0 else 1.0
-        else:
-            # If no preference set, we return a neutral score or 1.0? 
-            # User preferences are missing, so technically it fulfills "any" preference.
-            # But usually we return 0 for lack of specific data to compare.
+        t = to_float('threshold')
+        l = to_float('lower')
+        u = to_float('upper')
+
+        # Fallback: If no threshold is given but bounds are, use the average as threshold
+        if t is None and (l is not None or u is not None):
+            t = (l + u) / 2 if (l is not None and u is not None) else (l or u)
+
+        # If absolutely no benchmark data, return neutral/zero
+        if t is None:
             return 0.0
-        
-        if width == 0: width = 1.0
-        
-        # k is steepness. We want score to be ~0.1 at 'low' end and ~0.9 at 'high' end of the 'good' range.
-        # Sigmoid(x) for x=2.2 is ~0.9. x=-2.2 is ~0.1.
-        k = 4.4 / width
-        
-        diff = val - mid
-        x = k * diff
-        
-        if direction == 'lower':
-            x = -x
+
+        # ---- SCENARIO 1: Val is on the "BAD" UPPER side ----
+        if u is not None and val > t:
+            if val >= u: 
+                return 0.01  # Beyond max upper limit = hard penalty
             
-        return sigmoid(x)
+            # Scale distance between threshold (0.0) and upper limit (4.4)
+            # This ensures val == t gives ~0.99, and val == u gives ~0.01
+            width = u - t
+            k = 8.8 / width
+            return sigmoid(4.4 - k * (val - t))
+
+        # ---- SCENARIO 2: Val is on the "BAD" LOWER side ----
+        elif l is not None and val < t:
+            if val <= l: 
+                return 0.01  # Beyond min lower limit = hard penalty
+            
+            # Scale distance between threshold and lower limit
+            width = t - l
+            k = 8.8 / width
+            return sigmoid(4.4 - k * (t - val))
+
+        # ---- SCENARIO 3: Val is on the "GOOD" side (No limits breached) ----
+        else:
+            # If direction is 'lower' and value is below threshold (e.g., PE is 30, threshold 40)
+            # OR direction is 'higher' and value is above threshold (e.g., Growth is 25%, threshold 15%)
+            # This is exactly what the user wants! Perfect score.
+            if direction == 'lower' and val <= t:
+                return 1.0
+            if direction == 'higher' and val >= t:
+                return 1.0
+            
+            # Standard directional fallback if limits aren't explicitly provided
+            width = abs(t) * 0.2 if t != 0 else 1.0
+            k = 4.4 / width
+            x = (val - t) * k if direction == 'higher' else (t - val) * k
+            return sigmoid(x)
 
     except (ValueError, TypeError, OverflowError):
         return 0.0
+    
 
 async def perform_analysis_task(analysis_id: str):
     try:
@@ -154,11 +176,12 @@ async def perform_analysis_task(analysis_id: str):
 
         # Quantitative Analysis
         quant_results = {}
-        total_quant_score = 0.0
-        source_count = 0
+        total_weighted_quant_score = 0.0
+        total_quant_weight = 0.0
 
         for source_cfg in run.data_sources:
             source_name = source_cfg.source
+            source_weight = getattr(source_cfg, 'weightage', 1.0)
             if not source_name: continue
             
             data = await fetch_voyager_data(source_name, run.symbol)
@@ -167,13 +190,14 @@ async def perform_analysis_task(analysis_id: str):
                 continue
             
             source_results = {"metrics": {}}
-            source_score = 0.0
+            source_raw_score = 0.0
             metric_count = 0
 
             for filter_cfg in source_cfg.filters:
                 metric = filter_cfg.metric
                 val = data.get(metric)
                 if val is None:
+                    # Case insensitive check
                     for k, v in data.items():
                         if k.lower() == metric.lower():
                             val = v
@@ -185,29 +209,70 @@ async def perform_analysis_task(analysis_id: str):
                     "value": val,
                     "score": round(score, 4)
                 }
-                source_score += score
+                source_raw_score += score
                 metric_count += 1
             
             if metric_count > 0:
-                source_results["score"] = round(source_score / metric_count, 4)
-                total_quant_score += source_results["score"]
-                source_count += 1
+                avg_source_score = source_raw_score / metric_count
+                source_results["score"] = round(avg_source_score, 4)
+                source_results["weightage"] = source_weight
+                
+                total_weighted_quant_score += avg_source_score * source_weight
+                total_quant_weight += source_weight
             
             quant_results[source_name] = source_results
 
-        # Calculated total quantitative score
-        final_quant_score = total_quant_score / source_count if source_count > 0 else 0.0
+        # Calculated total quantitative score (weighted)
+        final_quant_score = (total_weighted_quant_score / total_quant_weight * 100) if total_quant_weight > 0 else 0.0
         
-        # Qualitative (Agentic) - Future placeholder, currently 0.0
-        final_qual_score = 0.0
+        # Qualitative (Agentic) Analysis
+        qual_results = {}
+        total_weighted_qual_score = 0.0
+        total_qual_weight = 0.0
+        
+        agent = NebulaAgent(model=run.model)
+        
+        for qual_cfg in run.qualitative:
+            param = qual_cfg.parameter
+            content = qual_cfg.content
+            source = getattr(qual_cfg, 'preferred_source', 'Custom Document')
+            weight = getattr(qual_cfg, 'weightage', 1.0)
+            
+            if not param: continue
+            
+            # Run agent analysis
+            analysis_output = await agent.analyze_parameter(
+                symbol=run.symbol,
+                parameter=param,
+                guidelines=content,
+                preferred_source=source
+            )
+            
+            score = analysis_output["score"]
+            qual_results[param] = {
+                "analysis": analysis_output["analysis"],
+                "score": score,
+                "weightage": weight,
+                "preferred_source": source
+            }
+            
+            total_weighted_qual_score += score * weight
+            total_qual_weight += weight
+
+        final_qual_score = (total_weighted_qual_score / total_qual_weight) if total_qual_weight > 0 else 0.0
 
         run.runs["latest_quant"] = quant_results
-        run.quantitative_score = round(final_quant_score, 4)
-        run.qualitative_score = round(final_qual_score, 4)
+        run.runs["latest_qual"] = qual_results
         
-        # Total score is a weighted average (50/50 for now if both exist, otherwise whatever is there)
-        # For now, let's just average them
-        run.total_score = round((final_quant_score + final_qual_score) / 1.0, 4) # Adjusting denominator if needed
+        run.quantitative_score = round(final_quant_score, 2)
+        run.qualitative_score = round(final_qual_score, 2)
+        
+        # Total score is average of the two pillars (each 0-100)
+        # Note: final_quant_score was multiplied by 100 above to be on same scale as qual (0-100)
+        if final_quant_score > 0 and final_qual_score > 0:
+            run.total_score = round((final_quant_score + final_qual_score) / 2, 2)
+        else:
+            run.total_score = round(final_quant_score or final_qual_score, 2)
         
         run.status = "COMPLETED"
         run.end_time = time.time()
