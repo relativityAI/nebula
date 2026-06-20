@@ -103,47 +103,57 @@ async def search_profiles(query: str):
 
 # --- CSV Search Helpers ---
 
-EXCHANGES_DF = None
+SOURCES_DF = None
 STOCKS_DF = None
+SEC_STOCKS_DF = None
 
-def get_exchanges_df():
-    global EXCHANGES_DF
-    if EXCHANGES_DF is None:
-        path = "assets/exchanges.csv"
+def get_sources_df():
+    global SOURCES_DF
+    if SOURCES_DF is None:
+        path = "assets/sources.csv"
         if os.path.exists(path):
-            EXCHANGES_DF = pd.read_csv(path, skipinitialspace=True)
+            SOURCES_DF = pd.read_csv(path, skipinitialspace=True)
         else:
-            EXCHANGES_DF = pd.DataFrame(columns=["NAME", "SYMBOL", "COUNTRY"])
-    return EXCHANGES_DF
+            SOURCES_DF = pd.DataFrame(columns=["NAME", "SYMBOL", "COUNTRY"])
+    return SOURCES_DF
 
-def get_stocks_df():
-    global STOCKS_DF
-    if STOCKS_DF is None:
-        path = "assets/nse-equities.csv"
-        if os.path.exists(path):
-            STOCKS_DF = pd.read_csv(path, skipinitialspace=True)
-        else:
-            STOCKS_DF = pd.DataFrame(columns=["SYMBOL", "NAME"])
-    return STOCKS_DF
+def get_stocks_df(source: str = "NSE"):
+    if source.upper() == "SEC":
+        global SEC_STOCKS_DF
+        if SEC_STOCKS_DF is None:
+            path = "assets/sec-equities.csv"
+            if os.path.exists(path):
+                SEC_STOCKS_DF = pd.read_csv(path, skipinitialspace=True)
+            else:
+                SEC_STOCKS_DF = pd.DataFrame(columns=["ticker", "name", "cik", "exchange"])
+        return SEC_STOCKS_DF
+    else:
+        global STOCKS_DF
+        if STOCKS_DF is None:
+            path = "assets/nse-equities.csv"
+            if os.path.exists(path):
+                STOCKS_DF = pd.read_csv(path, skipinitialspace=True)
+            else:
+                STOCKS_DF = pd.DataFrame(columns=["SYMBOL", "NAME"])
+        return STOCKS_DF
 
-@app.get("/search-exchanges")
-async def search_exchanges(query: str):
-    if not query:
-        return []
-    df = get_exchanges_df()
-    query = query.lower()
-    mask = df["NAME"].astype(str).str.lower().str.contains(query, na=False) | \
-           df["SYMBOL"].astype(str).str.lower().str.contains(query, na=False)
-    return df[mask].head(50).to_dict(orient="records")
+@app.get("/available-sources")
+async def available_sources():
+    df = get_sources_df()
+    return df.to_dict(orient="records")
 
 @app.get("/search-stocks")
-async def search_stocks(query: str):
+async def search_stocks(query: str, source: str = "NSE"):
     if not query:
         return []
-    df = get_stocks_df()
+    df = get_stocks_df(source)
     query = query.lower()
-    mask = df["NAME"].astype(str).str.lower().str.contains(query, na=False) | \
-           df["SYMBOL"].astype(str).str.lower().str.contains(query, na=False)
+    if source.upper() == "SEC":
+        mask = df["name"].astype(str).str.lower().str.contains(query, na=False) | \
+               df["ticker"].astype(str).str.lower().str.contains(query, na=False)
+    else:
+        mask = df["NAME"].astype(str).str.lower().str.contains(query, na=False) | \
+               df["SYMBOL"].astype(str).str.lower().str.contains(query, na=False)
     return df[mask].head(50).to_dict(orient="records")
 
 
@@ -238,6 +248,7 @@ async def read_analysis(id: str):
         "quantitative_score": run.quantitative_score,
         "qualitative_score": run.qualitative_score,
         "quantitative_analysis": run.runs.get("latest_quant", {}),
+        "qualitative_analysis": run.runs.get("latest_qual", {}),
         "qualitative": [json.loads(q.model_dump_json()) for q in run.qualitative],
         "data_sources": [json.loads(d.model_dump_json()) for d in run.data_sources],
         "error": run.error,
