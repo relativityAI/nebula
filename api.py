@@ -8,7 +8,7 @@ from loguru import logger
 from typing import Dict, Any, Optional, List, Union
 from contextlib import asynccontextmanager
 from src.db.connection import init_db
-from src.db.models import Profile, QualitativeModel, DataSourceModel
+from src.db.models import Profile, QualitativeParam, QuantitativeCriterion
 from src.core import (
     run_analysis_logic,
     get_run_scores_logic,
@@ -27,17 +27,23 @@ from __version__ import __version__
 class ProfileModel(BaseModel):
     id: Union[PydanticObjectId, str] = Field(..., alias="_id")
     name: Optional[str] = None
-    qualitative: Optional[List[QualitativeModel]] = None
-    data_sources: Optional[List[DataSourceModel]] = None
+    source: Optional[str] = None
+    qualitative: Optional[List[QualitativeParam]] = None
+    quantitative: Optional[List[QuantitativeCriterion]] = None
 
     model_config = {
         "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "id": "6a15dcadcc56b79582c6a5f9",
-                "name": "Profile Name",
-                "qualitative": [],
-                "data_sources": []
+                "name": "Quality Growth Profile",
+                "source": "NSE",
+                "qualitative": [
+                    {"parameter": "Management Quality", "content": "Strong board with industry experience", "weightage": 8}
+                ],
+                "quantitative": [
+                    {"category": "raw_income_statement", "metric": "RevenueFromOperations", "metric_name": "Revenue from Operations", "metric_type": "currency", "weightage": 7, "operator": "gt", "value": 10000000, "value_upper": None}
+                ]
             }
         }
     }
@@ -46,9 +52,10 @@ class ProfileModel(BaseModel):
 class ProfileInfo(BaseModel):
     id: PydanticObjectId = Field(..., alias="_id")
     name: str
+    source: str
     created_at: datetime
     qualitative: Optional[List[Any]] = None
-    data_sources: Optional[List[Any]] = None
+    quantitative: Optional[List[Any]] = None
 
     model_config = {"populate_by_name": True}
 
@@ -182,7 +189,7 @@ async def create_profile(
         
     data = {"name": name, "id": "", "_id": "", "ok": 0, "created_at": ""}
     try:
-        profile = Profile(name=name, qualitative=[], data_sources=[])
+        profile = Profile(name=name, source="", qualitative=[], quantitative=[])
         await profile.insert()
 
         data["id"] = str(profile.id)
@@ -201,12 +208,14 @@ async def update_profile(profile: ProfileModel):
     if not p:
         return {"ok": 0, "error": "Profile not found"}
         
-    if profile.name:
+    if profile.name is not None:
         p.name = profile.name
+    if profile.source is not None:
+        p.source = profile.source
     if profile.qualitative is not None:
         p.qualitative = profile.qualitative
-    if profile.data_sources is not None:
-        p.data_sources = profile.data_sources
+    if profile.quantitative is not None:
+        p.quantitative = profile.quantitative
     
     await p.save()
     return {"ok": 1}
@@ -247,10 +256,11 @@ async def read_analysis(id: str):
         "total_score": run.total_score,
         "quantitative_score": run.quantitative_score,
         "qualitative_score": run.qualitative_score,
+        "source": run.source,
         "quantitative_analysis": run.runs.get("latest_quant", {}),
         "qualitative_analysis": run.runs.get("latest_qual", {}),
         "qualitative": [json.loads(q.model_dump_json()) for q in run.qualitative],
-        "data_sources": [json.loads(d.model_dump_json()) for d in run.data_sources],
+        "quantitative": [json.loads(q.model_dump_json()) for q in run.quantitative],
         "error": run.error,
         "created_at": run.created_at,
         "end_time": run.end_time,

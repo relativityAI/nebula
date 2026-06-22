@@ -81,8 +81,9 @@ async def read_profile(name: str):
     profile = await get_profile_logic(name)
     if profile:
         logger.info(f"Profile: {profile.name}")
-        logger.info(f"Data Sources: {json.dumps(profile.data_sources, indent=2)}")
-        logger.info(f"Parameters: {json.dumps(profile.parameters, indent=2)}")
+        logger.info(f"Source: {profile.source}")
+        logger.info(f"Qualitative: {json.dumps([q.model_dump() for q in profile.qualitative], indent=2)}")
+        logger.info(f"Quantitative: {json.dumps([q.model_dump() for q in profile.quantitative], indent=2)}")
     else:
         logger.error(f"Profile '{name}' not found.")
 
