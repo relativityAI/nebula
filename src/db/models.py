@@ -1,78 +1,51 @@
 from beanie import Document, Indexed
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
-from pydantic import Field
-
-# class Profile(Document):
-#     name: Indexed(str, unique=True)
-#     created_at: datetime = Field(default_factory=datetime.utcnow)
-#     data_sources: Dict[str, Any] = Field(default_factory=dict)
-#     parameters: Dict[str, Any] = Field(default_factory=dict)
-    
-#     # Metadata
-#     llm: Optional[str] = None
-#     max_rpm: Optional[int] = None
-#     max_iter: Optional[int] = None
-#     max_retry_limit: Optional[int] = None
-
-#     class Settings:
-#         name = "profiles"
-
-
 from pydantic import BaseModel, Field
 
-class QualitativeModel(BaseModel):
+
+class QualitativeParam(BaseModel):
     parameter: str
     content: str
-    preferred_source: Optional[str] = "Custom Document"
-    weightage: float = 1.0
+    weightage: int = Field(default=5, ge=1, le=10)
 
-class DataSourceFilter(BaseModel):
+
+class QuantitativeCriterion(BaseModel):
+    category: str
     metric: str
-    direction: Optional[Any] = "higher"
-    threshold: Optional[Any] = None
-    upper: Optional[Any] = None
-    lower: Optional[Any] = None
-    title: Optional[str] = None
-    type: Optional[str] = None
+    metric_name: str
+    metric_type: str  # "number" | "currency" | "percentage" | "date" | "text"
+    weightage: int = Field(default=5, ge=1, le=10)
+    operator: str     # "gt" | "gte" | "lt" | "lte" | "eq" | "between" | "before" | "after"
+    value: Any
+    value_upper: Optional[Any] = None
 
-class DataSourceFilter(BaseModel):
-    metric: str
-    direction: Optional[Any] = "higher"
-    threshold: Optional[Any] = None
-    upper: Optional[Any] = None
-    lower: Optional[Any] = None
-    title: Optional[str] = None
-    type: Optional[str] = None
-
-class DataSourceModel(BaseModel):
-    source: str
-    image: Optional[str] = ""
-    filters: List[DataSourceFilter] = []
-    weightage: float = 1.0
 
 class Profile(Document):
     name: Indexed(str, unique=True)
-    qualitative: List[QualitativeModel]
-    data_sources: List[DataSourceModel]
-    created_at: datetime = Field(default_factory=datetime.now)
+    source: str = ""
+    qualitative: List[QualitativeParam] = []
+    quantitative: List[QuantitativeCriterion] = []
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Settings:
         name = "profiles"
+
 
 class AnalysisRun(Document):
     analysis_id: Indexed(str, unique=True)
     symbol: str
     share_name: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     profile: str
-    qualitative: List[QualitativeModel] = []
-    data_sources: List[DataSourceModel] = []
+    source: str = ""
+    qualitative: List[QualitativeParam] = []
+    quantitative: List[QuantitativeCriterion] = []
     model: str
     iterations: int
     rpm: int
     max_retry: int
-    status: str = "PENDING"  # PENDING, RUNNING, COMPLETED, FAILED
+    status: str = "PENDING"
     total_score: float = 0.0
     quantitative_score: float = 0.0
     qualitative_score: float = 0.0
