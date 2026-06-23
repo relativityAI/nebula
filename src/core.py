@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any
 from loguru import logger
 from datetime import datetime
 from src.db.models import Profile, AnalysisRun, QuantitativeCriterion
+from src.agentic_analysis.agent import NebulaAgent
 import pandas as pd
 import httpx
 import math
@@ -133,7 +134,15 @@ async def fetch_financial_ratios(source: str, symbol: str):
     return None
 
 
-async def perform_analysis_task(analysis_id: str):
+def _resolve_api_key(model: str, api_keys: dict) -> str:
+    provider = model.split("/")[0].lower() if "/" in model else model.lower()
+    if provider in ("ollama", "local"):
+        return None
+    key = api_keys.get(provider) or os.getenv(f"{provider.upper()}_API_KEY")
+    return key
+
+
+async def perform_analysis_task(analysis_id: str, api_keys: dict = None):
     try:
         task_start = time.time()
         run = await AnalysisRun.find_one({"analysis_id": analysis_id})
@@ -150,6 +159,8 @@ async def perform_analysis_task(analysis_id: str):
             run.error = "Profile not found"
             await run.save()
             return
+
+        api_keys = api_keys or {}
 
         # Quantitative Analysis
         quant_results = {}
@@ -182,26 +193,53 @@ async def perform_analysis_task(analysis_id: str):
 
         final_quant_score = (total_weighted_quant_score / total_quant_weight * 100) if total_quant_weight > 0 else 0.0
 
-        # Qualitative Analysis (dummy)
+        # Qualitative Analysis (LLM-powered)
         qual_results = {}
         total_weighted_qual_score = 0.0
         total_qual_weight = 0.0
+        qual_errors = []
+
+        agent_api_key = _resolve_api_key(run.model, api_keys)
+        agent = NebulaAgent(model=run.model, api_key=agent_api_key)
 
         for qual_cfg in run.qualitative:
             param = qual_cfg.parameter
-            content = qual_cfg.content
+            guidelines = qual_cfg.content
             weight = qual_cfg.weightage
             if not param:
                 continue
 
-            dummy_score = random.randint(50, 90)
+            param_error = None
+            try:
+                result = await agent.analyze_parameter(
+                    symbol=run.symbol,
+                    parameter=param,
+                    guidelines=guidelines,
+                    documents=run.documents,
+                    web_search=run.web_search,
+                    web_sources=run.web_sources,
+                )
+                score = result["score"]
+                analysis_text = result["analysis"]
+                if result.get("error"):
+                    param_error = result["error"]
+            except Exception as e:
+                logger.error(f"LLM qualitative analysis failed for '{param}': {e}")
+                score = 50.0
+                analysis_text = f"Analysis failed: {str(e)}"
+                param_error = str(e)
+
+            if param_error:
+                qual_errors.append(f"{param}: {param_error}")
+
             qual_results[param] = {
-                "analysis": f"Dummy analysis for '{param}': {content}",
-                "score": dummy_score,
-                "weightage": weight
+                "analysis": analysis_text,
+                "score": score,
+                "weightage": weight,
+                "error": param_error,
             }
 
-            total_weighted_qual_score += dummy_score * weight
+            total_weighted_qual_score += score * weight
             total_qual_weight += weight
 
         final_qual_score = (total_weighted_qual_score / total_qual_weight) if total_qual_weight > 0 else 0.0
@@ -217,11 +255,24 @@ async def perform_analysis_task(analysis_id: str):
         else:
             run.total_score = round(final_quant_score or final_qual_score, 2)
 
-        run.status = "COMPLETED"
+        if qual_errors:
+            run.error = "; ".join(qual_errors)
+            if len(qual_errors) == len(run.qualitative):
+                run.status = "FAILED"
+                logger.warning(f"Analysis {analysis_id} failed: all qualitative params had errors")
+            else:
+                run.status = "COMPLETED"
+                logger.warning(f"Analysis {analysis_id} completed with {len(qual_errors)} qualitative error(s)")
+        else:
+            run.status = "COMPLETED"
+
         run.end_time = time.time()
         run.duration = run.end_time - task_start
         await run.save()
-        logger.info(f"Analysis {analysis_id} completed successfully")
+        if run.status == "FAILED":
+            logger.error(f"Analysis {analysis_id} finished with status FAILED")
+        else:
+            logger.info(f"Analysis {analysis_id} completed successfully")
 
     except Exception as e:
         logger.exception(f"Error in perform_analysis_task: {str(e)}")
@@ -237,9 +288,9 @@ async def run_analysis_logic(
     profile_name: str,
     model: str = "cerebras/qwen-3-32b",
     analysis_id: str = None,
-    iters: int = 1,
-    rpm: int = 2,
-    max_retry: int = 3
+    documents: List[str] = None,
+    web_search: bool = False,
+    web_sources: List[str] = None,
 ):
     def short_id(n=2):
         ts = datetime.utcnow().strftime("%y%m%d%H%M%S")
@@ -261,9 +312,9 @@ async def run_analysis_logic(
         quantitative=profile.quantitative,
         model=model,
         analysis_id=aid,
-        iterations=iters,
-        rpm=rpm,
-        max_retry=max_retry,
+        documents=documents or [],
+        web_search=web_search,
+        web_sources=web_sources or [],
         status="PENDING"
     )
     await run.insert()

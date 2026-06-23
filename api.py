@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 import uvicorn
 import os
 import pandas as pd
@@ -64,8 +64,9 @@ class AnalysisRequest(BaseModel):
     symbol: str
     profile_name: str
     model: str = "cerebras/qwen-3-32b"
-    iters: int = 1
-    rpm: int = 2
+    documents: List[str] = []
+    web_search: bool = False
+    web_sources: List[str] = []
 
 class AnalysisModel(BaseModel):
     analysis_id: str
@@ -93,6 +94,11 @@ app = FastAPI(title="Nebula", version=__version__, lifespan=lifespan)
 @app.get("/")
 def ping():
     return {"ok": 1}
+
+@app.get("/available-models")
+def available_models():
+    import litellm
+    return litellm.model_list
 
 @app.get("/search-profiles")
 async def search_profiles(query: str):
@@ -267,9 +273,9 @@ async def read_analysis(id: str):
         "duration": run.duration,
         "analysis_id": run.analysis_id,
         "model": run.model,
-        "iterations": run.iterations,
-        "rpm": run.rpm,
-        "max_retry": run.max_retry
+        "documents": run.documents,
+        "web_search": run.web_search,
+        "web_sources": run.web_sources
     }
 
 
@@ -291,20 +297,69 @@ async def get_analysis_legacy(analysis_id: str):
 
 
 @app.post("/run-analysis")
-async def run_analysis_endpoint(request: AnalysisRequest, background_tasks: BackgroundTasks):
+async def run_analysis_endpoint(body: AnalysisRequest, http_request: Request, background_tasks: BackgroundTasks):
     try:
+        api_keys = _extract_api_keys(http_request)
+        logger.info(f"Requested model: {body.model}")
+        logger.info(f"API keys found in headers: {list(api_keys.keys())}")
+        _validate_api_key_for_model(body.model, api_keys)
+
         run = await run_analysis_logic(
-            share_name=request.share_name,
-            symbol=request.symbol,
-            profile_name=request.profile_name,
-            model=request.model,
-            iters=request.iters,
-            rpm=request.rpm
+            share_name=body.share_name,
+            symbol=body.symbol,
+            profile_name=body.profile_name,
+            model=body.model,
+            documents=body.documents,
+            web_search=body.web_search,
+            web_sources=body.web_sources,
         )
-        background_tasks.add_task(perform_analysis_task, run.analysis_id)
+        background_tasks.add_task(perform_analysis_task, run.analysis_id, api_keys)
         return {"status": "success", "analysis_id": run.analysis_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _extract_api_keys(request: Request) -> dict:
+    headers = request.headers
+    mapping = {
+        "openai": "X-LLM-OpenAI-Key",
+        "gemini": "X-LLM-Gemini-Key",
+        "cerebras": "X-LLM-Cerebras-Key",
+        "groq": "X-LLM-Groq-Key",
+    }
+    keys = {}
+    for provider, header in mapping.items():
+        val = headers.get(header)
+        if val:
+            masked = val[:6] + "..." + val[-4:] if len(val) > 12 else "***"
+            logger.info(f"Found {header}: {masked}")
+            keys[provider] = val
+        else:
+            logger.info(f"{header} not provided in request headers")
+    return keys
+
+
+def _validate_api_key_for_model(model: str, api_keys: dict):
+    provider = model.split("/")[0].lower() if "/" in model else model.lower()
+    logger.info(f"Validating API key for provider '{provider}' (model: {model})")
+    if provider in ("ollama", "local"):
+        logger.info(f"No API key needed for provider '{provider}'")
+        return
+    key = api_keys.get(provider) or os.getenv(f"{provider.upper()}_API_KEY")
+    if key:
+        logger.info(f"API key found for provider '{provider}'")
+    else:
+        logger.warning(f"No API key found for provider '{provider}' — checking fallbacks")
+        env_var = f"{provider.upper()}_API_KEY"
+        header_var = f"X-LLM-{provider.capitalize()}-Key"
+        logger.warning(f"Checked header '{header_var}' and env var '{env_var}' — neither was set")
+        raise HTTPException(
+            status_code=400,
+            detail=f"No API key available for provider '{provider}'. "
+                   f"Provide {header_var} header or set {env_var} env var."
+        )
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8002))
