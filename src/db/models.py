@@ -42,15 +42,15 @@ class AnalysisRun(Document):
     qualitative: List[QualitativeParam] = []
     quantitative: List[QuantitativeCriterion] = []
     model: str
-    iterations: int
-    rpm: int
-    max_retry: int
     status: str = "PENDING"
     total_score: float = 0.0
     quantitative_score: float = 0.0
     qualitative_score: float = 0.0
     error: Optional[str] = None
     runs: Dict[str, Any] = Field(default_factory=dict)
+    documents: List[str] = []
+    web_search: bool = False
+    web_sources: List[str] = []
     duration: float = 0.0
     end_time: Optional[float] = None
 

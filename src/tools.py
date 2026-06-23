@@ -349,6 +349,130 @@ toolmanager.register(tools=tools)
 ##############################################
 
 
+# =====================================================================
+# Async Tools for LLM Agent Tool Calling
+# =====================================================================
+
+import asyncio
+import httpx
+import re
+import os
+from io import BytesIO
+
+
+async def tavily_web_search(query: str) -> str:
+    """Search the web via Tavily API for recent information."""
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        return "Error: TAVILY_API_KEY environment variable is not set."
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": api_key,
+                    "query": query,
+                    "search_depth": "advanced",
+                    "max_results": 5,
+                },
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                return f"Error: Tavily search returned status {resp.status_code}"
+            data = resp.json()
+            results = data.get("results", [])
+            if not results:
+                return "No web search results found."
+            parts = []
+            for r in results:
+                parts.append(
+                    f"Title: {r.get('title', 'N/A')}\n"
+                    f"URL: {r.get('url', 'N/A')}\n"
+                    f"Content: {r.get('content', 'N/A')}\n"
+                )
+            return "\n---\n".join(parts)
+        except Exception as e:
+            return f"Error during web search: {str(e)}"
+
+
+async def fetch_web_source(source: str, symbol: str) -> str:
+    """Fetch raw data from a stock analysis web source via Voyager.
+    Supported sources: screener, trendlyne."""
+    voyager_base = os.getenv("VOYAGER_URL", "http://localhost:8001")
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(
+                f"{voyager_base}/web-source",
+                params={"id": source, "symbol": symbol},
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                return f"Error: {source} returned status {resp.status_code}"
+            text = resp.text
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+            return text[:50000]
+        except Exception as e:
+            return f"Error fetching {source}: {str(e)}"
+
+
+async def read_document_from_url(url: str) -> str:
+    """Fetch a document from a URL (SEC filing, PDF, etc.) and extract its text content."""
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+    }
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(url, headers=headers, follow_redirects=True, timeout=60)
+            if resp.status_code != 200:
+                return f"Error: failed to fetch document with status {resp.status_code}"
+            content_type = resp.headers.get("content-type", "")
+            if "pdf" in content_type or url.lower().endswith(".pdf"):
+                try:
+                    from pypdf import PdfReader
+                    reader = PdfReader(BytesIO(resp.content))
+                    text = ""
+                    for page in reader.pages:
+                        t = page.extract_text()
+                        if t:
+                            text += t + "\n"
+                    return text[:50000] or "PDF contained no extractable text."
+                except Exception as e:
+                    return f"Error extracting PDF: {str(e)}"
+            else:
+                text = resp.text
+                text = re.sub(r'<[^>]+>', ' ', text)
+                text = re.sub(r'\s+', ' ', text).strip()
+                return text[:50000]
+        except Exception as e:
+            return f"Error reading document URL: {str(e)}"
+
+
+async def read_company_transcript(symbol: str) -> str:
+    """Get the latest earnings call transcript for a company (async)."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, read_latest_transcript, symbol)
+
+
+async def read_annual_report_section_async(symbol: str, section_keywords: str) -> str:
+    """Read a specific section from the latest annual report (async).
+    section_keywords: e.g. 'management discussion analysis', 'corporate governance', 'business overview'."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None, lambda: read_annual_report_section(symbol, section_keywords)
+    )
+
+
+async def read_shareholdings_async(symbol: str) -> str:
+    """Get the shareholding pattern (promoter, FII, DII) for a company (async)."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, read_shareholdings, symbol)
+
+
 if __name__ == "__main__":
 
     import json
