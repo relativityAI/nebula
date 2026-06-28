@@ -10,12 +10,17 @@ from src.db.models import Profile, AnalysisRun, QuantitativeCriterion
 from src.agentic_analysis.agent import NebulaAgent
 import pandas as pd
 import httpx
-import math
+import yfinance as yf
 
 
-def sigmoid(x):
-    x = max(-500, min(500, x))
-    return 1 / (1 + math.exp(-x))
+def _linear_decay(val, threshold, spread):
+    if val <= threshold - spread:
+        return 0.0
+    if val >= threshold + spread:
+        return 0.0
+    if val < threshold:
+        return round((val - (threshold - spread)) / spread, 4)
+    return round(((threshold + spread) - val) / spread, 4)
 
 
 def _find_metric(data, metric, category=None):
@@ -49,27 +54,27 @@ def evaluate_metric(val, criterion: QuantitativeCriterion):
         if val is None:
             return 0.0
 
-        if metric_type in ("number", "currency", "percentage"):
+        if metric_type in ("number", "currency", "percentage", "multiple", "ratio"):
             val = float(val)
             threshold = float(threshold)
-            spread = max(abs(threshold), 1.0) * 0.2
+            spread = max(abs(threshold), 1.0) * 0.5
 
             if operator == "gt":
                 if val > threshold:
                     return 1.0
-                return sigmoid((val - threshold) / spread)
+                return _linear_decay(val, threshold, spread)
             elif operator == "gte":
                 if val >= threshold:
                     return 1.0
-                return sigmoid((val - threshold) / spread)
+                return _linear_decay(val, threshold, spread)
             elif operator == "lt":
                 if val < threshold:
                     return 1.0
-                return sigmoid((threshold - val) / spread)
+                return _linear_decay(val, threshold, spread)
             elif operator == "lte":
                 if val <= threshold:
                     return 1.0
-                return sigmoid((threshold - val) / spread)
+                return _linear_decay(val, threshold, spread)
             elif operator == "eq":
                 return 1.0 if val == threshold else 0.0
             elif operator == "between":
@@ -78,8 +83,8 @@ def evaluate_metric(val, criterion: QuantitativeCriterion):
                     if threshold <= val <= upper:
                         return 1.0
                     if val < threshold:
-                        return sigmoid((val - threshold) / spread)
-                    return sigmoid((upper - val) / spread)
+                        return _linear_decay(val, threshold, spread)
+                    return _linear_decay(val, upper, spread)
                 return 0.0
 
         elif metric_type == "date":
@@ -105,6 +110,22 @@ def evaluate_metric(val, criterion: QuantitativeCriterion):
         return 0.0
 
 
+def fetch_live_price_and_pe(symbol: str) -> dict:
+    result = {}
+    try:
+        t = yf.Ticker(f"{symbol}.NS")
+        info = t.info
+        price = info.get("currentPrice") or info.get("regularMarketPrice") or info.get("previousClose")
+        if price is not None:
+            result["current_price"] = round(float(price), 2)
+        tpe = info.get("trailingPE")
+        if tpe is not None:
+            result["pe_ratio"] = round(float(tpe), 4)
+    except Exception as e:
+        logger.error(f"yfinance fetch failed for {symbol}: {e}")
+    return result
+
+
 async def fetch_financial_ratios(source: str, symbol: str):
     voyager_base_url = os.getenv("VOYAGER_URL", "http://localhost:8001")
     url = f"{voyager_base_url}/financial-ratios"
@@ -114,20 +135,37 @@ async def fetch_financial_ratios(source: str, symbol: str):
             response = await client.get(url, params=params, timeout=15.0)
             if response.status_code == 200:
                 raw = response.json()
+                flat = {}
+
+                cp = raw.get("current_price")
+                if cp is not None:
+                    flat["current_price"] = cp
+
+                valuation = raw.get("valuation")
+                if isinstance(valuation, dict):
+                    for k, v in valuation.items():
+                        if v is not None:
+                            flat[k] = v
+
                 records = raw.get("records", [])
                 if records:
-                    record = records[0]
-                    flat = {}
-                    for section in ("ratios", "growth"):
-                        section_data = record.get(section, {})
-                        if isinstance(section_data, dict):
-                            for key, val in section_data.items():
-                                if isinstance(val, dict):
-                                    flat.update(val)
+                    def _flatten(obj, prefix=""):
+                        if isinstance(obj, dict):
+                            for k, v in obj.items():
+                                if k in ("date",):
+                                    continue
+                                if isinstance(v, dict):
+                                    _flatten(v, prefix)
                                 else:
-                                    flat[key] = val
-                    return flat
-                return raw
+                                    if v is not None:
+                                        flat[k] = v
+
+                    _flatten(records[0])
+
+                live = fetch_live_price_and_pe(symbol)
+                flat.update(live)
+
+                return flat
             logger.error(f"Voyager financial-ratios error: {response.status_code}")
         except Exception as e:
             logger.error(f"Error calling Voyager financial-ratios: {str(e)}")
@@ -162,6 +200,12 @@ async def perform_analysis_task(analysis_id: str, api_keys: dict = None):
 
         api_keys = api_keys or {}
 
+        tavily_key = api_keys.get("tavily")
+        if tavily_key:
+            os.environ["TAVILY_API_KEY"] = tavily_key
+        elif "TAVILY_API_KEY" not in os.environ:
+            logger.warning("TAVILY_API_KEY not provided in headers and not set in env")
+
         # Quantitative Analysis
         quant_results = {}
         total_weighted_quant_score = 0.0
@@ -195,12 +239,13 @@ async def perform_analysis_task(analysis_id: str, api_keys: dict = None):
 
         # Qualitative Analysis (LLM-powered)
         qual_results = {}
+        qual_tool_calls = {}
         total_weighted_qual_score = 0.0
         total_qual_weight = 0.0
         qual_errors = []
 
         agent_api_key = _resolve_api_key(run.model, api_keys)
-        agent = NebulaAgent(model=run.model, api_key=agent_api_key)
+        agent = NebulaAgent(model=run.model, api_key=agent_api_key, rpm=10)
 
         for qual_cfg in run.qualitative:
             param = qual_cfg.parameter
@@ -218,16 +263,19 @@ async def perform_analysis_task(analysis_id: str, api_keys: dict = None):
                     documents=run.documents,
                     web_search=run.web_search,
                     web_sources=run.web_sources,
+                    source=run.source,
                 )
                 score = result["score"]
                 analysis_text = result["analysis"]
                 if result.get("error"):
                     param_error = result["error"]
+                qual_tool_calls[param] = result.get("tool_calls", [])
             except Exception as e:
                 logger.error(f"LLM qualitative analysis failed for '{param}': {e}")
                 score = 50.0
                 analysis_text = f"Analysis failed: {str(e)}"
                 param_error = str(e)
+                qual_tool_calls[param] = []
 
             if param_error:
                 qual_errors.append(f"{param}: {param_error}")
@@ -246,6 +294,7 @@ async def perform_analysis_task(analysis_id: str, api_keys: dict = None):
 
         run.runs["latest_quant"] = quant_results
         run.runs["latest_qual"] = qual_results
+        run.runs["qual_tool_calls"] = qual_tool_calls
 
         run.quantitative_score = round(final_quant_score, 2)
         run.qualitative_score = round(final_qual_score, 2)
@@ -271,6 +320,8 @@ async def perform_analysis_task(analysis_id: str, api_keys: dict = None):
         await run.save()
         if run.status == "FAILED":
             logger.error(f"Analysis {analysis_id} finished with status FAILED")
+        elif qual_errors:
+            logger.warning(f"Analysis {analysis_id} completed with {len(qual_errors)} qualitative error(s)")
         else:
             logger.info(f"Analysis {analysis_id} completed successfully")
 

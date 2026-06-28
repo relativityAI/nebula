@@ -265,6 +265,7 @@ async def read_analysis(id: str):
         "source": run.source,
         "quantitative_analysis": run.runs.get("latest_quant", {}),
         "qualitative_analysis": run.runs.get("latest_qual", {}),
+        "qualitative_tool_calls": run.runs.get("qual_tool_calls", {}),
         "qualitative": [json.loads(q.model_dump_json()) for q in run.qualitative],
         "quantitative": [json.loads(q.model_dump_json()) for q in run.quantitative],
         "error": run.error,
@@ -328,13 +329,12 @@ def _extract_api_keys(request: Request) -> dict:
         "gemini": "X-LLM-Gemini-Key",
         "cerebras": "X-LLM-Cerebras-Key",
         "groq": "X-LLM-Groq-Key",
+        "tavily": "X-LLM-Tavily-Key",
     }
     keys = {}
     for provider, header in mapping.items():
         val = headers.get(header)
         if val:
-            masked = val[:6] + "..." + val[-4:] if len(val) > 12 else "***"
-            logger.info(f"Found {header}: {masked}")
             keys[provider] = val
         else:
             logger.info(f"{header} not provided in request headers")

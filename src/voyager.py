@@ -494,7 +494,7 @@ THRESHOLDS = {
             }
 
 from src.technicals import get_price_data
-from nebula.utils.score import *
+from utils.score import *
 
 def nse_financials_analysis(symbol: str, thresholds=THRESHOLDS):
     df = nse_financials(symbol)

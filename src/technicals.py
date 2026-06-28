@@ -1,7 +1,7 @@
 import yfinance as yf
 import talib
 import pandas as pd
-from nebula.utils.score import *
+from utils.score import *
 
 # -----------------------------
 # Thresholds for technical indicators
