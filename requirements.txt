@@ -13,3 +13,5 @@ pyjwt
 beanie
 motor
 python-dotenv
+yfinance
+ta-lib
