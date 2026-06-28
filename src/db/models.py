@@ -4,6 +4,15 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 
+class ToolCallRecord(BaseModel):
+    tool_name: str
+    args: Dict[str, Any] = Field(default_factory=dict)
+    result: Optional[str] = None
+    status: str
+    duration: float = 0.0
+    error: Optional[str] = None
+
+
 class QualitativeParam(BaseModel):
     parameter: str
     content: str
